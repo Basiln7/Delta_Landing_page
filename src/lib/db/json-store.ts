@@ -72,10 +72,11 @@ export const jsonStore: DataStore = {
   readDb,
   readContent: async () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { orders, enquiries, processedEvents, mail, mailLog, security, ...content } = await readDb();
+    const { orders, enquiries, processedEvents, mail, mailLog, security, adminUsers, adminAudit, ...content } = await readDb();
     return content;
   },
-  readSecurity: async () => (await readDb()).security,
+  readAdminUser: async (id) => (await readDb()).adminUsers?.find((u) => u.id === id) ?? null,
+  readAdminUsers: async () => (await readDb()).adminUsers ?? [],
   mutateDb,
   ping: async () => {
     await ensureFile();

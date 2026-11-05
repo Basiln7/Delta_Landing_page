@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { fieldErrors, mailSettingsSchema } from "@/lib/admin/schemas";
 import { mutateDb, readDb } from "@/lib/db";
 import { MailConfigError, toSmtpConfig } from "@/lib/mail/send";
@@ -10,7 +10,7 @@ import { encryptionStatus } from "@/lib/secrets";
 
 /** Email settings for Admin → Email. The SMTP password is write-only: GET never returns it (or its ciphertext). */
 export async function GET() {
-  const denied = await requireAdmin();
+  const denied = await requireSuperAdmin();
   if (denied) return denied;
   const db = await readDb();
   return NextResponse.json(
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const denied = await requireAdmin();
+  const denied = await requireSuperAdmin();
   if (denied) return denied;
 
   const parsed = mailSettingsSchema.safeParse(await req.json().catch(() => null));

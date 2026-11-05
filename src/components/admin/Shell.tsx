@@ -17,26 +17,37 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  UsersRound,
   X,
 } from "lucide-react";
 import { DeltaMark } from "@/components/brand/Logo";
 import { CommandPalette, openCommandPalette } from "@/components/admin/CommandPalette";
 import { Portal } from "@/components/admin/Overlay";
 import { Kbd } from "@/components/admin/ui";
+import { isSuperAdmin, ROLE_META } from "@/lib/roles";
+import type { AdminRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Counts = { newEnquiries: number; pendingOrders: number };
+export type ShellUser = { name: string; email: string; role: AdminRole };
 
-const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badgeKey?: keyof Counts }[] = [
+const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badgeKey?: keyof Counts; superOnly?: boolean }[] = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/orders", label: "Orders", icon: ReceiptText, badgeKey: "pendingOrders" },
   { href: "/admin/enquiries", label: "Counselling", icon: Inbox, badgeKey: "newEnquiries" },
   { href: "/admin/content", label: "Content", icon: FileText },
   { href: "/admin/media", label: "Media", icon: ImageIcon },
-  { href: "/admin/email", label: "Email", icon: Mail },
+  { href: "/admin/email", label: "Email", icon: Mail, superOnly: true },
+  { href: "/admin/users", label: "Users", icon: UsersRound, superOnly: true },
   { href: "/admin/security", label: "Security", icon: ShieldCheck },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
+
+function initials(name: string, email: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const s = parts.length >= 2 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] ?? email).slice(0, 2);
+  return s.toUpperCase();
+}
 
 function isActive(pathname: string, href: string) {
   return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
@@ -54,10 +65,22 @@ function Brand() {
   );
 }
 
-function NavList({ pathname, counts, onNavigate, layoutId }: { pathname: string; counts: Counts; onNavigate?: () => void; layoutId: string }) {
+function NavList({
+  pathname,
+  counts,
+  role,
+  onNavigate,
+  layoutId,
+}: {
+  pathname: string;
+  counts: Counts;
+  role: AdminRole;
+  onNavigate?: () => void;
+  layoutId: string;
+}) {
   return (
     <nav aria-label="Admin" className="space-y-1">
-      {NAV.map(({ href, label, icon: Icon, badgeKey }) => {
+      {NAV.filter((n) => !n.superOnly || isSuperAdmin(role)).map(({ href, label, icon: Icon, badgeKey }) => {
         const active = isActive(pathname, href);
         const badge = badgeKey ? counts[badgeKey] : 0;
         return (
@@ -92,7 +115,7 @@ function NavList({ pathname, counts, onNavigate, layoutId }: { pathname: string;
   );
 }
 
-function SidebarFooter({ email, onLogout }: { email: string; onLogout: () => void }) {
+function SidebarFooter({ user, onLogout }: { user: ShellUser; onLogout: () => void }) {
   return (
     <div className="space-y-3">
       <a
@@ -104,10 +127,18 @@ function SidebarFooter({ email, onLogout }: { email: string; onLogout: () => voi
         View website <ArrowUpRight className="size-4" />
       </a>
       <div className="flex items-center gap-3 rounded-xl bg-white/[0.04] p-2.5">
-        <span className="grid size-9 place-items-center rounded-lg bg-brass/20 font-mono text-xs text-brass-light uppercase">{email.slice(0, 2)}</span>
+        <Link
+          href="/admin/security"
+          title={`${user.email} · your account`}
+          className="grid size-9 shrink-0 place-items-center rounded-lg bg-brass/20 font-mono text-xs text-brass-light transition-colors hover:bg-brass/30"
+        >
+          {initials(user.name, user.email)}
+        </Link>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[0.8125rem] text-paper">{email}</p>
-          <p className="text-[0.6875rem] text-paper/40">Administrator</p>
+          <p className="truncate text-[0.8125rem] text-paper" title={user.email}>
+            {user.name}
+          </p>
+          <p className="text-[0.6875rem] text-paper/40">{ROLE_META[user.role].label}</p>
         </div>
         <button onClick={onLogout} aria-label="Sign out" className="grid size-8 place-items-center rounded-lg text-paper/50 transition-colors hover:bg-white/10 hover:text-paper">
           <LogOut className="size-4" />
@@ -117,7 +148,7 @@ function SidebarFooter({ email, onLogout }: { email: string; onLogout: () => voi
   );
 }
 
-export function AdminShell({ children, email, counts }: { children: ReactNode; email: string; counts: Counts }) {
+export function AdminShell({ children, user, counts }: { children: ReactNode; user: ShellUser; counts: Counts }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -151,10 +182,10 @@ export function AdminShell({ children, email, counts }: { children: ReactNode; e
         <div className="relative mt-7">{searchButton}</div>
         <p className="eyebrow relative mt-8 mb-3 px-3 text-paper/35">Workspace</p>
         <div className="relative flex-1">
-          <NavList pathname={pathname} counts={counts} layoutId="nav-active-desktop" />
+          <NavList pathname={pathname} counts={counts} role={user.role} layoutId="nav-active-desktop" />
         </div>
         <div className="relative">
-          <SidebarFooter email={email} onLogout={logout} />
+          <SidebarFooter user={user} onLogout={logout} />
         </div>
       </aside>
 
@@ -195,9 +226,9 @@ export function AdminShell({ children, email, counts }: { children: ReactNode; e
                 </div>
                 <div className="mt-6">{searchButton}</div>
                 <div className="mt-6 flex-1">
-                  <NavList pathname={pathname} counts={counts} onNavigate={() => setMobileOpen(false)} layoutId="nav-active-mobile" />
+                  <NavList pathname={pathname} counts={counts} role={user.role} onNavigate={() => setMobileOpen(false)} layoutId="nav-active-mobile" />
                 </div>
-                <SidebarFooter email={email} onLogout={logout} />
+                <SidebarFooter user={user} onLogout={logout} />
               </motion.aside>
             </div>
           )}
@@ -216,7 +247,7 @@ export function AdminShell({ children, email, counts }: { children: ReactNode; e
         </motion.div>
       </main>
 
-      <CommandPalette />
+      <CommandPalette role={user.role} />
     </div>
   );
 }

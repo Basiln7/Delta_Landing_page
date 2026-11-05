@@ -21,9 +21,13 @@ import {
   MessageCircle,
   ShieldCheck,
   Upload,
+  UserPlus,
+  UsersRound,
 } from "lucide-react";
 import { Modal } from "@/components/admin/Overlay";
 import { Kbd } from "@/components/admin/ui";
+import { isSuperAdmin } from "@/lib/roles";
+import type { AdminRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface Command {
@@ -33,6 +37,8 @@ interface Command {
   icon: ReactNode;
   keywords?: string;
   run: () => void;
+  /** only offered to super admins (the server enforces it too) */
+  superOnly?: boolean;
 }
 
 export const OPEN_PALETTE_EVENT = "admin:command-palette";
@@ -41,7 +47,7 @@ export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_PALETTE_EVENT));
 }
 
-export function CommandPalette() {
+export function CommandPalette({ role }: { role: AdminRole }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,10 +85,13 @@ export function CommandPalette() {
       { id: "enquiries", label: "Counselling requests", group: "Navigate", icon: <Inbox />, keywords: "enquiries leads inbox counselling calls", run: go("/admin/enquiries") },
       { id: "content", label: "Content", group: "Navigate", icon: <FileText />, keywords: "courses plans pricing instructors batches faq stories", run: go("/admin/content") },
       { id: "settings", label: "Settings", group: "Navigate", icon: <Settings />, keywords: "contact socials", run: go("/admin/settings") },
-      { id: "security", label: "Security", group: "Navigate", icon: <ShieldCheck />, keywords: "2fa two-step authenticator password sessions sign out checklist", run: go("/admin/security") },
-      { id: "email", label: "Email notifications", group: "Navigate", icon: <Mail />, keywords: "smtp mail notifications gmail credentials sender", run: go("/admin/email") },
-      { id: "smtp", label: "Change SMTP credentials", group: "Actions", icon: <MailCheck />, keywords: "email password host server mail", run: go("/admin/email#smtp") },
-      { id: "mail-log", label: "View email delivery log", group: "Actions", icon: <Mail />, keywords: "sent failed bounce notifications", run: go("/admin/email#log") },
+      { id: "security", label: "Security", group: "Navigate", icon: <ShieldCheck />, keywords: "2fa two-step authenticator password sessions sign out checklist account profile name", run: go("/admin/security") },
+      { id: "users", label: "Users", group: "Navigate", icon: <UsersRound />, keywords: "team admins staff roles super admin people accounts", run: go("/admin/users"), superOnly: true },
+      { id: "email", label: "Email notifications", group: "Navigate", icon: <Mail />, keywords: "smtp mail notifications gmail credentials sender", run: go("/admin/email"), superOnly: true },
+      { id: "add-user", label: "Add a user", group: "Actions", icon: <UserPlus />, keywords: "invite admin team member staff new account", run: go("/admin/users?new=1"), superOnly: true },
+      { id: "password", label: "Change my password", group: "Actions", icon: <ShieldCheck />, keywords: "account security reset", run: go("/admin/security#account") },
+      { id: "smtp", label: "Change SMTP credentials", group: "Actions", icon: <MailCheck />, keywords: "email password host server mail", run: go("/admin/email#smtp"), superOnly: true },
+      { id: "mail-log", label: "View email delivery log", group: "Actions", icon: <Mail />, keywords: "sent failed bounce notifications", run: go("/admin/email#log"), superOnly: true },
       { id: "course", label: "Add a course", group: "Actions", icon: <BookPlus />, keywords: "new course catalogue product", run: go("/admin/content?tab=courses&new=1") },
       { id: "pending", label: "Review pending orders", group: "Actions", icon: <ReceiptText />, keywords: "payments unpaid", run: go("/admin/orders?status=pending") },
       { id: "upload", label: "Upload media", group: "Actions", icon: <Upload />, keywords: "add image video new", run: go("/admin/media?upload=1") },
@@ -107,10 +116,11 @@ export function CommandPalette() {
   }, [router]);
 
   const filtered = useMemo(() => {
+    const allowed = commands.filter((c) => !c.superOnly || isSuperAdmin(role));
     const q = query.trim().toLowerCase();
-    if (!q) return commands;
-    return commands.filter((c) => `${c.label} ${c.keywords ?? ""}`.toLowerCase().includes(q));
-  }, [commands, query]);
+    if (!q) return allowed;
+    return allowed.filter((c) => `${c.label} ${c.keywords ?? ""}`.toLowerCase().includes(q));
+  }, [commands, query, role]);
 
   const safeActive = Math.min(active, Math.max(filtered.length - 1, 0));
 

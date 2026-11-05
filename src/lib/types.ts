@@ -310,7 +310,7 @@ export interface MailSettings {
 export interface MailLogEntry {
   id: string;
   at: string;
-  event: MailEvent | "test";
+  event: MailEvent | "test" | "admin_invite";
   to: string;
   subject: string;
   status: "sent" | "failed" | "skipped";
@@ -320,7 +320,7 @@ export interface MailLogEntry {
   ref?: string;
 }
 
-/** Admin account security state (single admin). Private: never part of public content. */
+/** Per-account 2FA + session state. Private: never part of public content. */
 export interface AdminSecurity {
   /** Bumped by "sign out everywhere" and by 2FA changes; sessions carrying an older value are rejected. */
   sessionVersion: number;
@@ -336,6 +336,68 @@ export interface AdminSecurity {
   /** SHA-256 hashes of single-use recovery codes */
   recoveryCodes?: { hash: string; usedAt?: string }[];
   updatedAt?: string;
+}
+
+/* ───────────── Admin users & roles — private ───────────── */
+
+export type AdminRole = "super_admin" | "admin";
+export const ADMIN_ROLES: AdminRole[] = ["super_admin", "admin"];
+
+export interface AdminInvite {
+  /** SHA-256 of the one-time token (the token itself is only ever in the link) */
+  tokenHash: string;
+  purpose: "invite" | "reset";
+  expiresAt: string;
+  createdAt: string;
+  /** user id of the super admin who created the link */
+  createdBy: string;
+}
+
+export interface AdminUser extends AdminSecurity {
+  id: string;
+  /** lowercased, unique */
+  email: string;
+  name: string;
+  role: AdminRole;
+  /** The server-configured account (ADMIN_EMAIL). Password comes from the environment; it can't be demoted, disabled or deleted. */
+  owner?: boolean;
+  disabled?: boolean;
+  /** scrypt hash (lib/security/password). Unset until the user accepts their invite. */
+  passwordHash?: string;
+  passwordChangedAt?: string;
+  invite?: AdminInvite;
+  createdAt: string;
+  /** user id of the creator */
+  createdBy?: string;
+  lastLoginAt?: string;
+}
+
+export const ADMIN_AUDIT_ACTIONS = [
+  "owner.created",
+  "user.created",
+  "user.invite_sent",
+  "user.reset_sent",
+  "user.renamed",
+  "user.role_changed",
+  "user.disabled",
+  "user.enabled",
+  "user.deleted",
+  "user.signed_out",
+  "user.2fa_reset",
+  "invite.accepted",
+  "password.reset",
+  "password.changed",
+] as const;
+export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
+
+/** User-management activity. Names/emails are snapshots so entries stay readable after a delete. */
+export interface AdminAuditEntry {
+  id: string;
+  at: string;
+  action: AdminAuditAction;
+  actor: { id: string; name: string; email: string };
+  target?: { id: string; name: string; email: string };
+  detail?: string;
 }
 
 export interface Database {
@@ -361,7 +423,10 @@ export interface Database {
   processedEvents?: ProcessedEvent[];
   mail?: MailSettings;
   mailLog?: MailLogEntry[];
+  /** Legacy single-admin state; moved into the owner's AdminUser on first start, then removed. */
   security?: AdminSecurity;
+  adminUsers?: AdminUser[];
+  adminAudit?: AdminAuditEntry[];
 }
 
 /** Collections editable through the generic admin collection editor. */
@@ -383,4 +448,7 @@ export const EDITABLE_COLLECTIONS = [
 export type EditableCollection = (typeof EDITABLE_COLLECTIONS)[number];
 
 /** Everything the public landing page needs (no enquiries or orders). */
-export type SiteContent = Omit<Database, "enquiries" | "orders" | "processedEvents" | "mail" | "mailLog" | "security" | "version">;
+export type SiteContent = Omit<
+  Database,
+  "enquiries" | "orders" | "processedEvents" | "mail" | "mailLog" | "security" | "adminUsers" | "adminAudit" | "version"
+>;

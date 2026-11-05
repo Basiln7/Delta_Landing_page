@@ -2,31 +2,45 @@ import "server-only";
 import { authConfigStatus } from "@/lib/auth";
 import { razorpayConfig } from "@/lib/payments/razorpay";
 import { encryptionStatus } from "@/lib/secrets";
-import type { AdminSecurity } from "@/lib/types";
+import type { AdminUser } from "@/lib/types";
 import { demoCheckoutAllowed } from "./policy";
 
 export type CheckState = "ok" | "warn" | "fail";
 export type Check = { id: string; label: string; state: CheckState; detail: string };
 
+const names = (users: AdminUser[]) => {
+  const list = users.slice(0, 3).map((u) => u.name);
+  return users.length > 3 ? `${list.join(", ")} and ${users.length - 3} more` : list.join(", ");
+};
+
+/** Two-step verification across every account that can sign in. */
+function twoFactorCheck(users: AdminUser[]): Check {
+  const active = users.filter((u) => !u.disabled && (u.owner || u.passwordHash));
+  const without = active.filter((u) => !u.totp);
+  const lowCodes = active.filter((u) => u.totp && (u.recoveryCodes ?? []).filter((c) => !c.usedAt).length < 3);
+  if (without.length) {
+    return {
+      id: "2fa",
+      label: "Two-step verification",
+      state: without.some((u) => u.role === "super_admin") ? "fail" : "warn",
+      detail: `Off for ${names(without)} (${without.length} of ${active.length}). A stolen password alone gives access to those accounts.`,
+    };
+  }
+  if (lowCodes.length) {
+    return { id: "2fa", label: "Two-step verification", state: "warn", detail: `On for everyone, but ${names(lowCodes)} ha${lowCodes.length === 1 ? "s" : "ve"} fewer than 3 recovery codes left.` };
+  }
+  return { id: "2fa", label: "Two-step verification", state: "ok", detail: `On for all ${active.length} active user${active.length === 1 ? "" : "s"}.` };
+}
+
 /** Production-readiness checks for Admin → Security. Reports booleans only — never secret values. */
-export function securityChecklist(sec: AdminSecurity): Check[] {
+export function securityChecklist(users: AdminUser[]): Check[] {
   const auth = authConfigStatus();
   const enc = encryptionStatus();
   const rzp = razorpayConfig();
   const site = process.env.NEXT_PUBLIC_SITE_URL ?? "";
-  const codesLeft = (sec.recoveryCodes ?? []).filter((c) => !c.usedAt).length;
 
   return [
-    {
-      id: "2fa",
-      label: "Two-step verification",
-      state: sec.totp ? (codesLeft >= 3 ? "ok" : "warn") : "fail",
-      detail: sec.totp
-        ? codesLeft >= 3
-          ? `On. ${codesLeft} recovery codes left.`
-          : `On, but only ${codesLeft} recovery code${codesLeft === 1 ? "" : "s"} left. Generate new ones.`
-        : "Off. A stolen password alone gives full access.",
-    },
+    twoFactorCheck(users),
     {
       id: "session-secret",
       label: "Session signing secret",
@@ -35,7 +49,7 @@ export function securityChecklist(sec: AdminSecurity): Check[] {
     },
     {
       id: "admin-password",
-      label: "Admin password",
+      label: "Owner password (server)",
       state: auth.passwordHashed ? "ok" : auth.passwordHashInvalid ? "fail" : auth.passwordStrong ? "warn" : auth.production ? "fail" : "warn",
       detail: auth.passwordHashed
         ? "Stored as a scrypt hash (ADMIN_PASSWORD_HASH)."

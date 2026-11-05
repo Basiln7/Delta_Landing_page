@@ -148,4 +148,6 @@ export const LIMITS = {
   mailTest: (admin: string): Rule => ({ key: bucket("mail-test", admin), limit: 5, windowMs: MIN }),
   mailVerify: (admin: string): Rule => ({ key: bucket("mail-verify", admin), limit: 10, windowMs: MIN }),
   securityAction: (admin: string): Rule => ({ key: bucket("sec-action", admin), limit: 10, windowMs: 10 * MIN }),
+  userAdmin: (admin: string): Rule => ({ key: bucket("user-admin", admin), limit: 30, windowMs: 10 * MIN }),
+  inviteIp: (ip: string): Rule => ({ key: bucket("invite-ip", ip), limit: 20, windowMs: 15 * MIN }),
 };

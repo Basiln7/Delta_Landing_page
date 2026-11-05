@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Copy, Download, KeyRound, LogOut, MonitorSmartphone, ShieldCheck, ShieldOff, Smartphone, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Crown, Download, Eye, EyeOff, KeyRound, LogOut, MonitorSmartphone, ShieldCheck, ShieldOff, Smartphone, UserRound, XCircle } from "lucide-react";
 import { Badge, Button, Card, Field, Input, PageHeader } from "@/components/admin/ui";
 import { ConfirmDialog, Modal } from "@/components/admin/Overlay";
 import { RelativeTime } from "@/components/admin/RelativeTime";
 import { api, ApiError } from "@/lib/admin/client";
+import { ROLE_META } from "@/lib/roles";
 import type { publicSecurityState } from "@/lib/security/admin-api";
+import { PASSWORD_MIN, passwordProblem } from "@/lib/security/password-policy";
 import { cn } from "@/lib/utils";
 
 type State = ReturnType<typeof publicSecurityState>;
@@ -89,14 +92,19 @@ export function SecurityView({ initial }: { initial: State }) {
     }
   };
 
-  const issues = state.checklist.filter((c) => c.state !== "ok").length;
+  const checklist = state.checklist;
+  const issues = checklist ? checklist.filter((c) => c.state !== "ok").length : 0;
 
   return (
     <>
       <PageHeader
         eyebrow="Workspace"
         title="Security"
-        description="Protect the admin with two-step verification, control where you're signed in, and check that the server is configured safely for launch."
+        description={
+          checklist
+            ? "Your account, two-step verification and sessions, plus a check that the server is configured safely for launch."
+            : "Your account, two-step verification and where you're signed in."
+        }
         actions={
           <Badge tone={tf.enabled ? "green" : "pin"} className="px-3 py-1 text-xs">
             {tf.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
@@ -105,8 +113,10 @@ export function SecurityView({ initial }: { initial: State }) {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_1fr]">
-        <div className="min-w-0 space-y-6">
+      <div className={cn("grid gap-6", checklist && "xl:grid-cols-[1.25fr_1fr]")}>
+        <div className={cn("min-w-0 space-y-6", !checklist && "max-w-3xl")}>
+          <AccountCard state={state} onState={setState} />
+
           {/* ───────── 2FA ───────── */}
           <Card className="p-5 sm:p-7">
             <div className="flex items-start gap-4">
@@ -246,7 +256,8 @@ export function SecurityView({ initial }: { initial: State }) {
           </Card>
         </div>
 
-        {/* ───────── checklist ───────── */}
+        {/* ───────── checklist (super admins) ───────── */}
+        {checklist && (
         <Card className="h-fit p-5 sm:p-7">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="display text-2xl">Launch checklist</h2>
@@ -254,7 +265,7 @@ export function SecurityView({ initial }: { initial: State }) {
           </div>
           <p className="mt-1 text-sm text-ink/55">Server configuration that matters before real payments. Values are never shown, only whether they&apos;re safe.</p>
           <ul className="mt-5 divide-y divide-line">
-            {state.checklist.map((c) => (
+            {checklist.map((c) => (
               <li key={c.id} className="flex gap-3 py-3">
                 {c.state === "ok" ? (
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
@@ -271,6 +282,7 @@ export function SecurityView({ initial }: { initial: State }) {
             ))}
           </ul>
         </Card>
+        )}
       </div>
 
       {/* step-up: a fresh code before turning 2FA off or replacing recovery codes */}
@@ -317,6 +329,175 @@ export function SecurityView({ initial }: { initial: State }) {
         tone="primary"
       />
     </>
+  );
+}
+
+/* ───────── your account: name + password ───────── */
+
+function AccountCard({ state, onState }: { state: State; onState: (s: State) => void }) {
+  const router = useRouter();
+  const a = state.account;
+  const [name, setName] = useState(a.name);
+  const [savingName, setSavingName] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+
+  const saveName = async () => {
+    setSavingName(true);
+    try {
+      const r = await api<{ state: State }>("/api/admin/account", { method: "PATCH", json: { name: name.trim() } });
+      onState(r.state);
+      setName(r.state.account.name);
+      toast.success("Name updated");
+      router.refresh(); // the sidebar shows your name
+    } catch (e) {
+      toast.error(errorText(e, "Could not update your name"));
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  return (
+    <Card id="account" className="scroll-mt-24 p-5 sm:p-7">
+      <div className="flex items-start gap-4">
+        <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-paper text-ink/70">
+          <UserRound className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="display text-2xl">Your account</h2>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink/60">
+            <span className="break-all">{a.email}</span>
+            <Badge tone={a.role === "super_admin" ? "ink" : "neutral"}>{ROLE_META[a.role].label}</Badge>
+            {a.owner && (
+              <Badge tone="brass">
+                <Crown className="size-3" /> Owner
+              </Badge>
+            )}
+          </p>
+        </div>
+      </div>
+
+      <form
+        className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end"
+        onSubmit={(e) => {
+          e.preventDefault();
+          saveName();
+        }}
+      >
+        <Field label="Display name" htmlFor="account-name" className="sm:flex-1">
+          <Input id="account-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+        </Field>
+        <Button type="submit" variant="secondary" loading={savingName} disabled={!name.trim() || name.trim() === a.name}>
+          Save name
+        </Button>
+      </form>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-paper/40 px-4 py-3 text-sm">
+        {a.owner ? (
+          <p className="text-ink/60">
+            Your password is set on the server (<code className="font-mono text-xs">ADMIN_PASSWORD_HASH</code>). Change it there and restart the app.
+          </p>
+        ) : (
+          <>
+            <p className="text-ink/60">
+              Password{a.passwordChangedAt ? <> · changed <RelativeTime iso={a.passwordChangedAt} /></> : null}
+            </p>
+            <Button variant="secondary" size="sm" onClick={() => setPwOpen(true)}>
+              <KeyRound className="size-3.5" /> Change password
+            </Button>
+          </>
+        )}
+      </div>
+
+      <ChangePasswordModal
+        open={pwOpen}
+        email={a.email}
+        name={a.name}
+        onClose={() => setPwOpen(false)}
+        onDone={(s) => {
+          onState(s);
+          setPwOpen(false);
+        }}
+      />
+    </Card>
+  );
+}
+
+function ChangePasswordModal({ open, email, name, onClose, onDone }: { open: boolean; email: string; name: string; onClose: () => void; onDone: (s: State) => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [busy, setBusy] = useState(false);
+  const problem = next ? passwordProblem(next, { email, name }) : null;
+  const mismatch = confirm.length > 0 && confirm !== next;
+
+  const reset = () => {
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setErrors({});
+    setShow(false);
+  };
+  const close = () => {
+    if (busy) return;
+    reset();
+    onClose();
+  };
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (problem || mismatch) return;
+    setBusy(true);
+    setErrors({});
+    try {
+      const r = await api<{ state: State }>("/api/admin/account/password", { method: "POST", json: { current, next } });
+      toast.success("Password changed", { description: "Your other sessions were signed out." });
+      reset();
+      onDone(r.state);
+    } catch (err) {
+      if (err instanceof ApiError && err.fields) setErrors(Object.fromEntries(Object.entries(err.fields).map(([k, v]) => [k, v?.[0]])));
+      else toast.error(errorText(err, "Could not change your password"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={close} label="Change password">
+      <form className="p-6" onSubmit={submit} noValidate>
+        <h2 className="display text-2xl">Change your password</h2>
+        <p className="mt-1.5 text-sm text-ink/60">You stay signed in here; every other session is signed out.</p>
+        <div className="mt-5 space-y-4">
+          <Field label="Current password" htmlFor="pw-current" error={errors.current}>
+            <Input id="pw-current" data-autofocus type={show ? "text" : "password"} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} aria-invalid={Boolean(errors.current)} />
+          </Field>
+          <Field label="New password" htmlFor="pw-next" error={errors.next ?? problem ?? undefined} hint={`At least ${PASSWORD_MIN} characters. A few random words work well.`}>
+            <div className="relative">
+              <Input id="pw-next" type={show ? "text" : "password"} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className="pr-11" aria-invalid={Boolean(errors.next || problem)} />
+              <button
+                type="button"
+                onClick={() => setShow((s) => !s)}
+                aria-label={show ? "Hide passwords" : "Show passwords"}
+                className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-ink/45 hover:bg-ink/5 hover:text-ink"
+              >
+                {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+          </Field>
+          <Field label="Repeat new password" htmlFor="pw-confirm" error={mismatch ? "The passwords don't match." : undefined}>
+            <Input id="pw-confirm" type={show ? "text" : "password"} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-invalid={mismatch} />
+          </Field>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="secondary" onClick={close} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={busy} disabled={!current || !next || Boolean(problem) || confirm !== next}>
+            Change password
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

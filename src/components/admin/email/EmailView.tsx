@@ -489,7 +489,7 @@ export function EmailView({
             {visibleLog.map((l) => (
               <li key={l.id} className="grid gap-x-4 gap-y-1 px-4 py-3 text-sm md:grid-cols-[7rem_10rem_1fr_auto] md:items-center">
                 <RelativeTime iso={l.at} className="text-xs text-ink/50 tabular-nums" />
-                <span className="font-medium">{l.event === "test" ? "Test email" : (MAIL_EVENT_META[l.event]?.label ?? l.event)}</span>
+                <span className="font-medium">{l.event === "test" ? "Test email" : l.event === "admin_invite" ? "Admin invite / reset link" : (MAIL_EVENT_META[l.event]?.label ?? l.event)}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-ink/80">{l.subject}</span>
                   <span className="block truncate text-xs text-ink/45">

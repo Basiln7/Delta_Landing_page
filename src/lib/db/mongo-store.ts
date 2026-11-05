@@ -2,7 +2,7 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import { MongoClient, type AnyBulkWriteOperation, type Db, type Document } from "mongodb";
 import { SEED_VERSION, seed } from "@/data/seed";
-import type { Database } from "@/lib/types";
+import type { AdminUser, Database } from "@/lib/types";
 import { DB_FILE } from "./paths";
 import type { ContentSnapshot, DataStore } from "./store";
 
@@ -45,10 +45,12 @@ const COLLECTIONS: Record<ArrayKey, { name: string; timeField?: string }> = {
   orders: { name: "orders", timeField: "createdAt" },
   processedEvents: { name: "processed_events", timeField: "receivedAt" },
   mailLog: { name: "mail_log", timeField: "at" },
+  adminUsers: { name: "admin_users", timeField: "createdAt" },
+  adminAudit: { name: "admin_audit", timeField: "at" },
 };
 
 const ARRAY_KEYS = Object.keys(COLLECTIONS) as ArrayKey[];
-const PRIVATE_KEYS: ArrayKey[] = ["orders", "enquiries", "processedEvents", "mailLog"];
+const PRIVATE_KEYS: ArrayKey[] = ["orders", "enquiries", "processedEvents", "mailLog", "adminUsers", "adminAudit"];
 const CONTENT_KEYS = ARRAY_KEYS.filter((k) => !PRIVATE_KEYS.includes(k));
 
 /* ───────────────────────── connection (cached across dev hot reloads) ───────────────────────── */
@@ -92,6 +94,11 @@ function prepare(db: Db) {
       ]),
       db.collection("processed_events").createIndex({ receivedAt: -1 }, { name: "receivedAt" }),
       db.collection("mail_log").createIndex({ at: -1 }, { name: "at" }),
+      db.collection("admin_users").createIndexes([
+        { key: { email: 1 }, name: "email_unique", unique: true },
+        { key: { "invite.tokenHash": 1 }, name: "invite_token", sparse: true },
+      ]),
+      db.collection("admin_audit").createIndex({ at: -1 }, { name: "at" }),
       ...CONTENT_KEYS.map((k) => db.collection(COLLECTIONS[k].name).createIndex({ _pos: 1 }, { name: "position" })),
     ]);
     await seedIfEmpty(db);
@@ -264,13 +271,11 @@ export const mongoStore: DataStore = {
   readDb,
   readContent: async () => (await snapshot(CONTENT_KEYS)) as unknown as ContentSnapshot,
   mutateDb,
-  readSecurity: async () => {
-    const doc = await (await database()).collection<SiteDoc>("site").findOne({ _id: "security" });
-    if (!doc) return undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { _id, ...fields } = doc;
-    return fields as unknown as Database["security"];
+  readAdminUser: async (id) => {
+    const doc = await (await database()).collection<Document>("admin_users").findOne({ _id: id } as Document, PROJECTION);
+    return (doc as unknown as AdminUser | null) ?? null;
   },
+  readAdminUsers: async () => (await readArray(await database(), "adminUsers")) as unknown as AdminUser[],
   ping: async () => {
     await (await database()).command({ ping: 1 });
   },

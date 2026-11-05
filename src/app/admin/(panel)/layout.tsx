@@ -15,7 +15,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const pendingOrders = db.orders.filter((o) => o.status === "pending").length;
 
   return (
-    <AdminShell email={session.email} counts={{ newEnquiries, pendingOrders }}>
+    <AdminShell user={{ name: session.name, email: session.email, role: session.role }} counts={{ newEnquiries, pendingOrders }}>
       {children}
     </AdminShell>
   );

@@ -8,6 +8,8 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public fields?: Record<string, string[] | undefined>,
+    /** the server asks for a fresh 2FA code before it will do this */
+    public stepUp = false,
   ) {
     super(message);
   }
@@ -28,7 +30,7 @@ export async function api<T = unknown>(url: string, init: RequestInit & { json?:
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/admin/login";
   }
-  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status, data.fields);
+  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status, data.fields, data.stepUp === true);
   return data as T;
 }
 

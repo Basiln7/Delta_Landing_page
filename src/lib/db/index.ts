@@ -25,9 +25,13 @@ export function mutateDb<T>(mutator: (db: Database) => T | Promise<T>): Promise<
   return store().mutateDb(mutator);
 }
 
-/** Admin security state only (2FA, session version) — one small read, used on every admin request. */
-export function readSecurity() {
-  return store().readSecurity();
+/** One admin user by id — one small read, used on every admin request. */
+export function readAdminUser(id: string) {
+  return store().readAdminUser(id);
+}
+
+export function readAdminUsers() {
+  return store().readAdminUsers();
 }
 
 /** Everything the public landing page renders (never loads orders or enquiries). */

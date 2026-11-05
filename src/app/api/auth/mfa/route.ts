@@ -4,6 +4,7 @@ import { clearMfaTicket, createSession, readMfaTicket } from "@/lib/auth";
 import { consumeSecondFactor } from "@/lib/security/admin-security";
 import { consumeAll, LIMITS } from "@/lib/security/rate-limit";
 import { clientIp, readJson, tooManyRequests } from "@/lib/security/request";
+import { getUser, isActiveUser, mutateUser } from "@/lib/security/users";
 
 const schema = z.object({ code: z.string().trim().min(6).max(20) });
 
@@ -26,13 +27,22 @@ export async function POST(req: Request) {
     return tooManyRequests(limit.retryAfter, "Too many wrong codes. Sign in again in a few minutes.");
   }
 
-  const result = await consumeSecondFactor(parsed.data.code);
+  // The account may have been disabled, deleted or reset since the password step.
+  if (!isActiveUser(await getUser(ticket.uid, { fresh: true }))) {
+    await clearMfaTicket();
+    return NextResponse.json({ error: "Your sign-in expired. Enter your password again.", restart: true }, { status: 401 });
+  }
+
+  const result = await consumeSecondFactor(ticket.uid, parsed.data.code);
   if (!result.ok) {
     await new Promise((r) => setTimeout(r, 300 + Math.random() * 300));
     return NextResponse.json({ error: "That code isn't valid. Check your authenticator app and try again." }, { status: 401 });
   }
 
   await clearMfaTicket();
-  await createSession(ticket.email, { mfa: true });
+  await mutateUser(ticket.uid, (u) => {
+    u.lastLoginAt = new Date().toISOString();
+  });
+  await createSession(ticket.uid, { mfa: true });
   return NextResponse.json({ ok: true, method: result.method, recoveryCodesLeft: result.recoveryCodesLeft });
 }

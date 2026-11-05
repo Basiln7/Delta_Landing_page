@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, requireAdmin } from "@/lib/auth";
+import { getSession, requireSuperAdmin } from "@/lib/auth";
 import { DEFAULT_CURRENCY } from "@/lib/commerce";
 import { readDb } from "@/lib/db";
 import * as T from "@/lib/mail/templates";
@@ -7,7 +7,7 @@ import { MAIL_EVENTS, type Enquiry, type Order } from "@/lib/types";
 
 /** Render a template with sample data (never real learner data) so admins can see what goes out. */
 export async function GET(req: Request) {
-  const denied = await requireAdmin();
+  const denied = await requireSuperAdmin();
   if (denied) return denied;
 
   const event = new URL(req.url).searchParams.get("event") ?? "";

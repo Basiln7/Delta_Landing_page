@@ -175,6 +175,41 @@ export function refundLearner(o: Order, brand: SiteSettings, currency: Currency)
   };
 }
 
+/** Invite to the admin, or a password reset. The link works once; only its hash is stored. */
+export function adminInvite(
+  brand: SiteSettings,
+  o: { name: string; roleLabel: string; url: string; purpose: "invite" | "reset"; expiresAt: string; by: string },
+): Rendered {
+  const first = o.name.split(" ")[0] || o.name;
+  const until = new Date(o.expiresAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const invite = o.purpose === "invite";
+  const intro = invite
+    ? `<strong>${esc(o.by)}</strong> added you to the ${esc(brand.name)} admin as <strong>${esc(o.roleLabel)}</strong>. Choose a password to activate your account.`
+    : `<strong>${esc(o.by)}</strong> started a password reset for your ${esc(brand.name)} admin account. Your old password no longer works. Choose a new one to sign in again.`;
+  return {
+    subject: oneLine(invite ? `You've been invited to the ${brand.name} admin` : `Reset your ${brand.name} admin password`),
+    html: layout({
+      brand,
+      audience: "staff",
+      preheader: invite ? "Choose a password to activate your admin account." : "Choose a new password for your admin account.",
+      heading: invite ? `Welcome, ${first}` : `Set a new password, ${first}`,
+      intro,
+      body: `<p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:${C.mute}">This link works once and expires on ${esc(until)}. If you weren't expecting this email, you can ignore it.</p>`,
+      cta: { href: o.url, label: invite ? "Choose your password" : "Set a new password" },
+    }),
+    text: text([
+      invite ? `Welcome, ${first}.` : `Set a new password, ${first}.`,
+      ``,
+      invite
+        ? `${o.by} added you to the ${brand.name} admin as ${o.roleLabel}. Choose a password to activate your account:`
+        : `${o.by} started a password reset for your ${brand.name} admin account. Your old password no longer works. Choose a new one:`,
+      o.url,
+      ``,
+      `This link works once and expires on ${until}.`,
+    ]),
+  };
+}
+
 export function testEmail(brand: SiteSettings, requestedBy: string): Rendered {
   const at = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
   return {

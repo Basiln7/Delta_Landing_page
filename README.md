@@ -14,7 +14,7 @@ npm run dev
 ```
 
 - Website → http://localhost:3000
-- Admin → http://localhost:3000/admin (sign in with the credentials in `.env.local`)
+- Admin → http://localhost:3000/admin (sign in with the credentials in `.env.local`; that account is the **owner**, a super admin who can add everyone else in Admin → Users)
 
 ## Scripts
 
@@ -39,7 +39,7 @@ src/components/admin/  admin UI kit
 src/data/seed.ts       ALL mock data (copy, people, events, media) — edit here or through the admin
 src/lib/db/            data layer: index.ts (API) → mongo-store.ts (MongoDB) or json-store.ts (local file)
 src/lib/mail/          SMTP email: transport, templates, delivery log, notification triggers
-src/lib/security/      rate limits, TOTP 2FA, CSP/headers, request guards, upload checks
+src/lib/security/      admin users + roles (users.ts, owner.ts), rate limits, TOTP 2FA, CSP/headers, request guards, upload checks
 src/proxy.ts           CSRF origin check for /api, nonce CSP for /admin
 storage/               uploads/ (+ db.json when MongoDB isn't configured) — gitignored
 ```
@@ -125,12 +125,35 @@ Each email can be switched off on its own, and **Preview** shows it with sample 
 
 Run any local SMTP catcher on port 1025/2525 (for example [Mailpit](https://mailpit.axllent.org/)). In Admin → Email, set host `127.0.0.1`, that port, and security **None (local testing only)**. Every email then lands in the catcher's inbox instead of being delivered.
 
+## Admin users & roles
+
+Everyone who works in the admin gets their own account. **Admin → Users** (super admins only) lists them with their role, status, 2-step status and last sign-in, plus an activity log of every change.
+
+| Role | Can do |
+|---|---|
+| **Super admin** | Everything: add, edit, disable and delete users, email server settings (Admin → Email), the launch checklist, plus all admin work |
+| **Admin** | Orders (incl. refunds), counselling requests, content, media, site settings, and their own account. No users, no email server settings |
+
+The rules are enforced by the server on every API route and page; the menu just hides what a role can't open.
+
+- **The owner:** the account in `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` on the server. It's a super admin that can't be demoted, disabled or deleted, and its password only changes on the server, so there's always a way back in. On first start it took over the existing 2FA and recovery codes.
+- **Adding someone:** Users → Add user → name, email, role. They get a one-time link (valid 72 h) to choose their own password; it's emailed when SMTP is set up, otherwise you copy it and send it. Nobody else ever sees their password.
+  - The token is in the link's `#fragment`, so it never reaches server logs; only its SHA-256 hash is stored.
+- **Managing someone:** click a user to rename them, change their role, send a new link, reset their password (old password stops working, they're signed out), sign them out everywhere, turn off their 2FA (lost phone), disable or delete them. Every change applies to their open sessions immediately.
+- **Guardrails:** nobody can change their own role, disable or delete themselves. Granting super admin, deleting a user and turning off someone's 2FA need a fresh code from your authenticator app (when you have 2FA on).
+- **Your own account** (any role): Admin → Security → change your name and password, set up 2-step verification, sign out other sessions.
+- **Upgrading from the single-admin version:** everyone signs in once more after deploying.
+- **Owner lost their phone and recovery codes:** on the server, in `mongosh`:
+  ```js
+  db.admin_users.updateOne({ _id: "owner" }, { $unset: { totp: "", totpPending: "", recoveryCodes: "" }, $inc: { sessionVersion: 1 } })
+  ```
+
 ## Security
 
 What protects the site and the admin, and what the server must be given before launch. **Admin → Security** shows a live checklist of the items below.
 
 ### Admin sign-in
-- **Two-step verification** (Admin → Security): after the password, a 6-digit code from an authenticator app (Google/Microsoft Authenticator, 1Password, …).
+- **Two-step verification** (Admin → Security, each user sets up their own): after the password, a 6-digit code from an authenticator app (Google/Microsoft Authenticator, 1Password, …).
   - The secret is stored encrypted, and a code can't be reused.
   - 10 single-use recovery codes are shown once and stored hashed.
   - Turning 2FA off or replacing the codes needs a current code.
@@ -153,7 +176,9 @@ What protects the site and the admin, and what the server must be given before l
 | Enquiry form | 5 / IP / 10 min · **3 / recipient email / hour** (it sends a confirmation email, so this stops our mail server being used to flood someone's inbox) |
 | Checkout | 15 / IP / 10 min |
 | Payment callbacks | 40 / IP / 10 min |
-| Test email · SMTP check · 2FA changes | 5 / min · 10 / min · 10 / 10 min per admin |
+| Test email · SMTP check · 2FA / password changes | 5 / min · 10 / min · 10 / 10 min per admin |
+| User management | 30 changes / 10 min per super admin |
+| Invite / reset links | 20 checks / IP / 15 min (stops link guessing) |
 
 Counters live in the `rate_limits` collection and expire on their own (TTL index). Without MongoDB they're kept in memory. **Run behind a proxy that sets the client IP** (`X-Real-IP` / `X-Forwarded-For`, which Vercel, Cloudflare and Nginx do), or every visitor shares one IP bucket.
 
@@ -176,7 +201,8 @@ Counters live in the `rate_limits` collection and expire on their own (TTL index
 |---|---|
 | `SESSION_SECRET` | Set a new random value and redeploy. Every session is signed out. |
 | `CREDENTIALS_ENCRYPTION_KEY` | Set a new key, re-enter the SMTP password, and turn 2FA off and on again (the old secret can't be decrypted). |
-| Admin password | Change `ADMIN_PASSWORD_HASH`, then Admin → Security → **Sign out everywhere else**. |
+| Owner password | Change `ADMIN_PASSWORD_HASH`, restart, then Admin → Security → **Sign out everywhere else**. |
+| Another user's password | Admin → Users → the user → **Reset password** (old password and sessions stop working at once). |
 | Razorpay keys | Regenerate them in the Razorpay dashboard. |
 
 ## Buying a course
@@ -247,6 +273,7 @@ In **Admin → Orders**, a paid Razorpay order shows **Refund via Razorpay**. Th
 - [ ] Serve the site over HTTPS and set `NEXT_PUBLIC_SITE_URL` (also used for links in emails).
 - [ ] Set a random `SESSION_SECRET` (48+ chars) and `ADMIN_PASSWORD_HASH` (`npm run hash-password`); remove `ADMIN_PASSWORD`.
 - [ ] Sign in and turn on **two-step verification** (Admin → Security); store the recovery codes safely. The Launch checklist there should be all green.
+- [ ] Add each team member in **Admin → Users** with the lowest role they need (Admin unless they manage people or email settings). Never share the owner login.
 - [ ] Set a dedicated `CREDENTIALS_ENCRYPTION_KEY`, configure SMTP in Admin → Email, and set up SPF/DKIM/DMARC for your sending domain so receipts don't land in spam.
 - [ ] Do one small real payment and one refund end to end; reconcile with the Razorpay dashboard.
 - [ ] Replace the demo coupons in `src/lib/commerce.ts` with coupons managed in the database.

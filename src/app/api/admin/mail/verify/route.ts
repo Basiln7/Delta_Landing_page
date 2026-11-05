@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession, requireAdmin } from "@/lib/auth";
+import { getSession, requireSuperAdmin } from "@/lib/auth";
 import { fieldErrors, mailSettingsSchema } from "@/lib/admin/schemas";
 import { mutateDb, readDb } from "@/lib/db";
 import { MailConfigError, toSmtpConfig, withDefaults } from "@/lib/mail/send";
@@ -15,7 +15,7 @@ const bodySchema = z.object({ settings: mailSettingsSchema.optional() });
  * Body `{ settings }` checks the unsaved form values; an empty body checks the saved settings.
  */
 export async function POST(req: Request) {
-  const denied = await requireAdmin();
+  const denied = await requireSuperAdmin();
   if (denied) return denied;
 
   const session = await getSession();

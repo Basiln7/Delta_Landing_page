@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { requirePageSession } from "@/lib/auth";
+import { requireSuperAdminPage } from "@/lib/auth";
 import { readDb } from "@/lib/db";
 import { toPublicMailSettings } from "@/lib/mail/shared";
 import { encryptionStatus } from "@/lib/secrets";
@@ -11,7 +11,8 @@ export const metadata: Metadata = { title: "Email" };
 const requestTime = () => Date.now();
 
 export default async function EmailPage() {
-  const session = await requirePageSession();
+  // SMTP credentials are server secrets: super admins only (the API enforces the same).
+  const session = await requireSuperAdminPage();
   const db = await readDb();
   return (
     <EmailView

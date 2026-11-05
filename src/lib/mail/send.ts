@@ -1,7 +1,7 @@
 import "server-only";
 import { mutateDb, readDb } from "@/lib/db";
 import { decryptSecret } from "@/lib/secrets";
-import type { MailEvent, MailLogEntry, MailSettings } from "@/lib/types";
+import type { MailLogEntry, MailSettings } from "@/lib/types";
 import { uid } from "@/lib/utils";
 import { DEFAULT_MAIL_SETTINGS, isMailConfigured } from "./shared";
 import { describeSmtpError, fromHeader, transportFor, type SmtpConfig } from "./transport";
@@ -48,7 +48,8 @@ export function toSmtpConfig(m: MailSettings, passwordOverride?: string): SmtpCo
 export type DeliveryResult = { status: MailLogEntry["status"]; error?: string; messageId?: string };
 
 type Outgoing = {
-  event: MailEvent | "test";
+  /** "test" and "admin_invite" are sent on demand by an admin, not by a notification toggle */
+  event: MailLogEntry["event"];
   to: string | string[];
   message: Rendered;
   /** overrides the configured Reply-To (e.g. staff replies go straight to the learner) */
@@ -65,7 +66,7 @@ export async function deliver(out: Outgoing, opts: { settings: MailSettings; con
   const { settings } = opts;
   if (!opts.force) {
     if (!settings.enabled || !isMailConfigured(settings)) return { status: "skipped" };
-    if (out.event !== "test" && !settings.events[out.event]) return { status: "skipped" };
+    if (out.event !== "test" && out.event !== "admin_invite" && !settings.events[out.event]) return { status: "skipped" };
   }
 
   const recipients = (Array.isArray(out.to) ? out.to : [out.to]).map((r) => r.trim()).filter(Boolean);

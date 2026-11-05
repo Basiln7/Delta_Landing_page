@@ -78,7 +78,7 @@ export default async function OverviewPage() {
   const money = (n: number) => formatPrice(n, data.currency);
   const wa = db.settings.contact.whatsapp?.trim() ?? "";
   const waLink = whatsappHref(wa, db.settings.contact.whatsappMessage);
-  const name = session.email.split("@")[0];
+  const name = session.name.trim().split(/\s+/)[0] || session.email.split("@")[0];
   const revenue8w = data.revenueWeekly.reduce((s, w) => s + w.value, 0);
 
   const todo = [

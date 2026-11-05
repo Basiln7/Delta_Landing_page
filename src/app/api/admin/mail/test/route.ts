@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, requireAdmin } from "@/lib/auth";
+import { getSession, requireSuperAdmin } from "@/lib/auth";
 import { fieldErrors, mailTestSchema } from "@/lib/admin/schemas";
 import { readDb } from "@/lib/db";
 import { deliver, MailConfigError, withDefaults } from "@/lib/mail/send";
@@ -12,7 +12,7 @@ import { consume, LIMITS } from "@/lib/security/rate-limit";
  * Bypasses the "enabled" and per-event switches (that's the point of a test), and is rate-limited.
  */
 export async function POST(req: Request) {
-  const denied = await requireAdmin();
+  const denied = await requireSuperAdmin();
   if (denied) return denied;
 
   const session = await getSession();

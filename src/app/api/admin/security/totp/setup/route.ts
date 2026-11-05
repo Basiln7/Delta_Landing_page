@@ -1,27 +1,26 @@
 import { NextResponse } from "next/server";
 import QRCode from "qrcode";
-import { getSecurityState } from "@/lib/auth";
 import { readDb } from "@/lib/db";
 import { encryptSecret, encryptionStatus } from "@/lib/secrets";
 import { guardSecurityAction } from "@/lib/security/admin-api";
-import { mutateSecurity } from "@/lib/security/admin-security";
 import { generateTotpSecret, otpauthUri } from "@/lib/security/totp";
+import { getUser, mutateUser } from "@/lib/security/users";
 
 /**
- * Start 2FA setup: create a new secret (stored encrypted as "pending" until a valid code confirms
- * the authenticator app has it) and return it as a QR code + manual key. Shown once, over HTTPS,
- * to a signed-in admin; never logged.
+ * Start 2FA setup for the signed-in user: create a new secret (stored encrypted as "pending" until
+ * a valid code confirms the authenticator app has it) and return it as a QR code + manual key.
+ * Shown once, over HTTPS, to that user; never logged.
  */
 export async function POST() {
   const guard = await guardSecurityAction();
   if ("response" in guard) return guard.response;
 
-  if ((await getSecurityState({ fresh: true })).totp) return NextResponse.json({ error: "Two-step verification is already on." }, { status: 409 });
+  if ((await getUser(guard.session.uid, { fresh: true }))?.totp) return NextResponse.json({ error: "Two-step verification is already on." }, { status: 409 });
   if (!encryptionStatus().available) return NextResponse.json({ error: "Set CREDENTIALS_ENCRYPTION_KEY on the server first." }, { status: 503 });
 
   const secret = generateTotpSecret();
-  await mutateSecurity((sec) => {
-    sec.totpPending = { secretEnc: encryptSecret(secret), createdAt: new Date().toISOString() };
+  await mutateUser(guard.session.uid, (user) => {
+    user.totpPending = { secretEnc: encryptSecret(secret), createdAt: new Date().toISOString() };
   });
 
   const issuer = (await readDb()).settings.name || "Delta Admin";

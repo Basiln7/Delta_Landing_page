@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { sessionOrError } from "@/lib/auth";
 import { currentPublicState } from "@/lib/security/admin-api";
 
-/** Admin → Security status: 2FA state, current session, production-readiness checklist. */
+/** Admin → Security status for the signed-in user: account, 2FA, current session (+ launch checklist for super admins). */
 export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  return NextResponse.json(await currentPublicState(session), { headers: { "Cache-Control": "no-store" } });
+  const auth = await sessionOrError();
+  if ("response" in auth) return auth.response;
+  return NextResponse.json(await currentPublicState(auth.session), { headers: { "Cache-Control": "no-store" } });
 }

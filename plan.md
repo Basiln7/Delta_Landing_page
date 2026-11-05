@@ -213,6 +213,56 @@ Found and fixed during testing:
 - **2FA cache in dev:** right after 2FA was turned off, the login route still saw the cached "2FA on" state. Security decisions now read fresh state, and the short cache is process-wide.
 - **Recovery-codes dialog:** it could trap an admin if the browser blocks the clipboard. A "written them down" fallback was added.
 
+## 5e. Admin users & roles (2026-11-05)
+
+**Goal:** more than one person can work in the admin, each with their own sign-in, and only trusted people can manage accounts. Two roles: **Super admin** and **Admin**. The existing account becomes a super admin.
+
+### Requirements
+- A **Users** page (table) where super admins add, edit, disable, delete and manage admin users.
+- Roles: `super_admin` and `admin`. Super admins can create, delete and manage other users; admins can't.
+- The existing account (`ADMIN_EMAIL` on the server) becomes a super admin and keeps its 2FA and recovery codes.
+- Every rule is enforced on the server (API + page), not just hidden in the menu.
+
+### Who can do what
+| Area | Admin | Super admin |
+|---|---|---|
+| Overview, Orders (incl. refunds), Counselling, Content, Media, Settings | ✓ | ✓ |
+| Own account: name, password, 2FA, sessions (Admin → Security) | ✓ | ✓ |
+| Email server settings + delivery log (SMTP credentials are server secrets) | – | ✓ |
+| Launch checklist (server configuration) | – | ✓ |
+| Users: add, change role, disable, delete, reset password / 2FA, activity log | – | ✓ |
+
+### Design
+- **Data:** `admin_users` collection (one document per user; unique email index) and `admin_audit` (user-management activity, newest 500 kept). Both are private: never part of the public site's data.
+  - A user: name, email, role, disabled flag, scrypt password hash, own 2FA secret (encrypted), recovery codes (hashed), own session version, last sign-in, who created it.
+- **The owner account:** the server-configured account (`ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH`) becomes a user with id `owner`, role super admin.
+  - Its password stays on the server (so the existing deployment steps still apply, and there's always a way back in).
+  - It can't be demoted, disabled, deleted or reset by anyone, so there is always at least one super admin.
+  - On first start it takes over the existing 2FA, recovery codes and session version; the old single-admin `security` record is then removed.
+- **Adding a user:** a super admin enters name, email and role. The account is created **without a password** and a one-time invite link is made (valid 72 h).
+  - The link is shown once to copy, and emailed if SMTP is set up.
+  - The token sits in the URL fragment (`/admin/invite#…`), so it never reaches server logs or the Referer header. Only its SHA-256 hash is stored.
+  - The new user chooses their own password (12+ characters). Super admins never see or set anyone's password.
+- **Reset password:** same flow with a 24 h link. The old password stops working at once and the user is signed out everywhere.
+- **Sessions:** the cookie carries the user id. Every request re-reads that user (2 s cache), so a role change, disable, delete or reset takes effect immediately.
+  - Disabled, deleted or unknown accounts get the same error and the same response time as a wrong password (no account discovery).
+- **Guardrails:**
+  - Nobody can change their own role, disable or delete themselves (prevents lockout; your own account is managed on the Security page).
+  - Granting super admin, deleting a user and resetting someone's 2FA need a fresh 2FA code from the acting super admin (when they have 2FA on).
+  - Rate limits on invite links (per IP) and on user-management actions (per admin).
+- **Activity log:** who created, invited, changed, disabled, reset or deleted whom, and when invites were accepted. Shown on the Users page.
+- **Upgrade note:** after deploying, everyone signs in once more (old cookies carry no user id).
+- **Testing:** an attack suite for roles — admin calling super-admin APIs and pages, self-promotion, demoting/deleting the owner or yourself, invite link reuse/expiry/guessing, disabled and deleted users' live sessions, step-up codes — plus the existing security suite on a production build.
+
+### Status: built ✓ (2026-11-05)
+- Users page (table, user drawer, add-user modal, one-time link dialog, activity log), invite / reset page, per-user Security page (name, password, 2FA, sessions), role-aware menu and command palette. Email settings and the launch checklist are super-admin only.
+- The roles suite passes on development (58/58) and on a production build (57/57; the legacy-cookie check runs in dev only). The existing security suite still passes on both (56/56 dev, 57/57 production). Every script on the signed-in admin pages carries the CSP nonce, and the browser shows no CSP violations.
+
+Found and fixed during testing:
+- **Invite page blocked in production:** it was statically generated, so its scripts couldn't carry the per-request CSP nonce. It now renders per request (`connection()`).
+- **Redirect status:** a page redirect after the admin layout starts streaming arrives as an in-page redirect (HTTP 200), not a 307. Admins still never receive super-admin data: the role check runs before any data is loaded, and the suite asserts nothing leaks.
+- **Layout:** the users table was too narrow at 1440 px next to the side cards; the cards moved below it.
+
 ## 6. Before launch
 - Replace mock mentors, testimonials, prices; confirm email; upload brochure.
 - MongoDB Atlas (with backups) in production; Razorpay live keys + live webhook (README → Payments).
