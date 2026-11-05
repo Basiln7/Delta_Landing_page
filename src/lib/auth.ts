@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { redirect } from "next/navigation";
 import { readSecurity } from "@/lib/db";
-import { verifyPasswordHash } from "@/lib/security/password";
+import { isPasswordHash, verifyPasswordHash } from "@/lib/security/password";
 import type { AdminSecurity } from "@/lib/types";
 
 /**
@@ -62,6 +62,14 @@ function credentials(): Credentials | null {
   const passwordHash = process.env.ADMIN_PASSWORD_HASH?.trim() || undefined;
   const password = process.env.ADMIN_PASSWORD || (isProd ? undefined : DEV_FALLBACK.password);
   if (!email || (!password && !passwordHash)) return null;
+  if (passwordHash && !isPasswordHash(passwordHash)) {
+    // Fail closed instead of silently rejecting every password.
+    console.error(
+      '[auth] Admin sign-in disabled: ADMIN_PASSWORD_HASH is not a valid hash. If it was cut short after "scrypt", ' +
+        "the $ signs were read as variables — run `npm run hash-password` again and paste the new (colon-separated) line.",
+    );
+    return null;
+  }
   if (isProd && !passwordHash && password && (password.length < 12 || PLACEHOLDER_PASSWORDS.has(password))) {
     console.error("[auth] Admin sign-in disabled: ADMIN_PASSWORD is a placeholder or shorter than 12 characters. Set ADMIN_PASSWORD_HASH (npm run hash-password) or a strong ADMIN_PASSWORD.");
     return null;
@@ -77,11 +85,14 @@ export function adminSignInConfigured() {
 export function authConfigStatus() {
   const s = process.env.SESSION_SECRET?.trim() ?? "";
   const pw = process.env.ADMIN_PASSWORD ?? "";
+  const hash = process.env.ADMIN_PASSWORD_HASH?.trim() ?? "";
+  const passwordHashed = Boolean(hash) && isPasswordHash(hash);
   return {
     production: isProd,
     sessionSecretStrong: s.length >= 32 && !PLACEHOLDER_SECRETS.has(s),
-    passwordHashed: Boolean(process.env.ADMIN_PASSWORD_HASH?.trim()),
-    passwordStrong: Boolean(process.env.ADMIN_PASSWORD_HASH?.trim()) || (pw.length >= 12 && !PLACEHOLDER_PASSWORDS.has(pw)),
+    passwordHashed,
+    passwordHashInvalid: Boolean(hash) && !passwordHashed,
+    passwordStrong: passwordHashed || (!hash && pw.length >= 12 && !PLACEHOLDER_PASSWORDS.has(pw)),
   };
 }
 

@@ -36,10 +36,12 @@ export function securityChecklist(sec: AdminSecurity): Check[] {
     {
       id: "admin-password",
       label: "Admin password",
-      state: auth.passwordHashed ? "ok" : auth.passwordStrong ? "warn" : auth.production ? "fail" : "warn",
+      state: auth.passwordHashed ? "ok" : auth.passwordHashInvalid ? "fail" : auth.passwordStrong ? "warn" : auth.production ? "fail" : "warn",
       detail: auth.passwordHashed
         ? "Stored as a scrypt hash (ADMIN_PASSWORD_HASH)."
-        : auth.passwordStrong
+        : auth.passwordHashInvalid
+          ? "ADMIN_PASSWORD_HASH is malformed, so sign-in is disabled. Run npm run hash-password again."
+          : auth.passwordStrong
           ? "Strong, but stored in plain text. Prefer ADMIN_PASSWORD_HASH (npm run hash-password)."
           : "Weak or the demo password. Production refuses it.",
     },

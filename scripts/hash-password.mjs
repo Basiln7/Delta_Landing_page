@@ -12,7 +12,8 @@ function hash(password) {
   const N = 2 ** 15, r = 8, p = 1;
   const salt = crypto.randomBytes(16);
   const out = crypto.scryptSync(password.normalize("NFKC"), salt, 32, { N, r, p, maxmem: 64 * 1024 * 1024 });
-  return ["scrypt", N, r, p, salt.toString("base64url"), out.toString("base64url")].join("$");
+  // Colon-separated: "$" would be expanded as a variable when the line is pasted into a .env file.
+  return ["scrypt", N, r, p, salt.toString("base64url"), out.toString("base64url")].join(":");
 }
 
 async function readPassword() {
