@@ -2,6 +2,9 @@ import { after, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { mutateDb } from "@/lib/db";
 import { notifyOrderPaid } from "@/lib/mail/notify";
+import { demoCheckoutAllowed } from "@/lib/security/policy";
+import { consume, LIMITS } from "@/lib/security/rate-limit";
+import { clientIp, readJson, tooManyRequests } from "@/lib/security/request";
 import { checkoutSchema } from "@/lib/validators";
 import { EMI_MIN_TOTAL } from "@/lib/commerce";
 import { CheckoutError, markOrderFailed, nextOrderNumber, priceCart, publicOrder } from "@/lib/orders";
@@ -18,19 +21,25 @@ import type { Order } from "@/lib/types";
  * Not configured: demo mode — the order is saved as paid immediately (no money moves).
  */
 export async function POST(req: Request) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+  const limit = await consume(LIMITS.checkoutIp(clientIp(req)));
+  if (!limit.ok) return tooManyRequests(limit.retryAfter, "Too many checkout attempts. Please wait a few minutes and try again.");
 
-  const parsed = checkoutSchema.safeParse(body);
+  const body = await readJson(req, 16 * 1024);
+  if (!body.ok) return body.response;
+
+  const parsed = checkoutSchema.safeParse(body.data);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validation failed", fields: parsed.error.flatten().fieldErrors }, { status: 422 });
   }
   const input = parsed.data;
   const rzp = razorpayConfig();
+
+  // Without Razorpay keys the demo checkout marks orders PAID with no money taken. Never on a live
+  // site by accident: production needs ALLOW_DEMO_CHECKOUT=true for that.
+  if (!rzp.enabled && !demoCheckoutAllowed()) {
+    console.error("[checkout] Razorpay keys are missing in production and demo checkout is disabled — refusing to create an order.");
+    return NextResponse.json({ error: "Online payment isn't available right now. Please contact us on WhatsApp to enrol." }, { status: 503 });
+  }
 
   // 1) Price + persist the order (pending for Razorpay, paid for demo).
   let order: Order;

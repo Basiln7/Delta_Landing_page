@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { mutateDb, readDb, UPLOAD_DIR } from "@/lib/db";
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES, humanizeFilename, mediaTypeFromMime } from "@/lib/admin/files";
+import { checkFileSignature } from "@/lib/security/file-signature";
 import { MEDIA_COLLECTIONS, type MediaCollection, type MediaItem } from "@/lib/types";
 import { slugify, uid } from "@/lib/utils";
 
@@ -51,9 +52,17 @@ export async function POST(req: Request) {
       continue;
     }
 
+    const bytes = Buffer.from(await file.arrayBuffer());
+    // Don't trust the browser's declared type: the file's own bytes must match it.
+    const signature = checkFileSignature(file.type, bytes);
+    if (!signature.ok) {
+      errors.push({ name: file.name, error: signature.reason });
+      continue;
+    }
+
     const base = slugify(file.name.replace(/\.[^.]+$/, "")).replace(/\./g, "-").slice(0, 60) || "file";
     const filename = `${base}-${uid().slice(0, 8)}.${ext}`;
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), Buffer.from(await file.arrayBuffer()));
+    await fs.writeFile(path.join(UPLOAD_DIR, filename), bytes);
 
     const width = Number(form.get(`width_${i}`)) || undefined;
     const height = Number(form.get(`height_${i}`)) || undefined;

@@ -6,7 +6,7 @@ import { mutateDb, readDb } from "@/lib/db";
 import { MailConfigError, toSmtpConfig, withDefaults } from "@/lib/mail/send";
 import { draftSmtpConfig, matchesSaved } from "@/lib/mail/settings";
 import { describeSmtpError, verifySmtp } from "@/lib/mail/transport";
-import { rateLimit } from "@/lib/rate-limit";
+import { consume, LIMITS } from "@/lib/security/rate-limit";
 
 const bodySchema = z.object({ settings: mailSettingsSchema.optional() });
 
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   if (denied) return denied;
 
   const session = await getSession();
-  const limit = rateLimit(`mail-verify:${session?.email}`, 10, 60_000);
+  const limit = await consume(LIMITS.mailVerify(session?.email ?? "admin"));
   if (!limit.ok) {
     return NextResponse.json({ error: `Too many checks — try again in ${limit.retryAfter}s.` }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }

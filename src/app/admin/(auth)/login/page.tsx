@@ -10,5 +10,6 @@ export const metadata: Metadata = {
 
 export default async function LoginPage() {
   if (await getSession()) redirect("/admin");
-  return <LoginView />;
+  // The demo-credentials hint is for local development only. Never advertise it on a live site.
+  return <LoginView showDemoHint={process.env.NODE_ENV !== "production"} />;
 }

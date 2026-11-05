@@ -72,9 +72,10 @@ export const jsonStore: DataStore = {
   readDb,
   readContent: async () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { orders, enquiries, processedEvents, mail, mailLog, ...content } = await readDb();
+    const { orders, enquiries, processedEvents, mail, mailLog, security, ...content } = await readDb();
     return content;
   },
+  readSecurity: async () => (await readDb()).security,
   mutateDb,
   ping: async () => {
     await ensureFile();

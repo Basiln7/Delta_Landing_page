@@ -1,6 +1,8 @@
 import { after, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { consume, LIMITS } from "@/lib/security/rate-limit";
+import { clientIp, readJson, tooManyRequests } from "@/lib/security/request";
 import { mutateDb, readDb } from "@/lib/db";
 import { notifyOrderPaid } from "@/lib/mail/notify";
 import { markOrderPaid, publicOrder } from "@/lib/orders";
@@ -25,7 +27,11 @@ const schema = z.object({
 export async function POST(req: Request) {
   if (!razorpayConfig().enabled) return NextResponse.json({ error: "Payments are not configured" }, { status: 503 });
 
-  const parsed = schema.safeParse(await req.json().catch(() => null));
+  const limit = await consume(LIMITS.paymentCallbackIp(clientIp(req)));
+  if (!limit.ok) return tooManyRequests(limit.retryAfter);
+  const body = await readJson(req, 8 * 1024);
+  if (!body.ok) return body.response;
+  const parsed = schema.safeParse(body.data);
   if (!parsed.success) return NextResponse.json({ error: "Invalid payment response" }, { status: 400 });
   const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = parsed.data;
 

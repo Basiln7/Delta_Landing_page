@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { consume, LIMITS } from "@/lib/security/rate-limit";
+import { clientIp, readJson, tooManyRequests } from "@/lib/security/request";
 import { mutateDb } from "@/lib/db";
 
 const schema = z.object({
@@ -17,7 +19,11 @@ const schema = z.object({
  * Razorpay order). Authoritative status changes come from signature verification and webhooks.
  */
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json().catch(() => null));
+  const limit = await consume(LIMITS.paymentCallbackIp(clientIp(req)));
+  if (!limit.ok) return tooManyRequests(limit.retryAfter);
+  const body = await readJson(req, 8 * 1024);
+  if (!body.ok) return body.response;
+  const parsed = schema.safeParse(body.data);
   if (!parsed.success) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   const { orderId, razorpay_order_id, code, description, reason } = parsed.data;
 

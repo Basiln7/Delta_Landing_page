@@ -21,7 +21,10 @@ import type { ContentSnapshot, DataStore } from "./store";
  * unordered bulkWrite per collection — so an order insert touches one document, not the whole site.
  */
 
-type ArrayKey = Exclude<keyof Database, "version" | "settings" | "partners" | "mail">;
+type ArrayKey = Exclude<keyof Database, "version" | "settings" | "partners" | SingletonKey>;
+/** Private single documents stored in `site` under their own _id. */
+type SingletonKey = "mail" | "security";
+const SINGLETONS: SingletonKey[] = ["mail", "security"];
 
 const COLLECTIONS: Record<ArrayKey, { name: string; timeField?: string }> = {
   stats: { name: "stats" },
@@ -161,7 +164,6 @@ async function readSite(db: Db, includePrivate: boolean) {
   const docs = await db.collection<SiteDoc>("site").find({}).toArray();
   const settings: Document = docs.find((d) => d._id === "settings") ?? {};
   const meta: Document = docs.find((d) => d._id === "meta") ?? {};
-  const mail: Document | undefined = docs.find((d) => d._id === "mail");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...settingsFields } = settings;
   const out: Record<string, unknown> = {
@@ -169,10 +171,14 @@ async function readSite(db: Db, includePrivate: boolean) {
     version: (meta.version as number) ?? SEED_VERSION,
     partners: (meta.partners as string[]) ?? [],
   };
-  if (includePrivate && mail) {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { _id: _m, ...mailFields } = mail;
-    out.mail = mailFields as Database["mail"];
+  if (includePrivate) {
+    for (const key of SINGLETONS) {
+      const doc = docs.find((d) => d._id === key);
+      if (!doc) continue;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _id: _s, ...fields } = doc;
+      out[key] = fields;
+    }
   }
   return out;
 }
@@ -197,11 +203,13 @@ async function persistChanges(before: Database, after: Database) {
   if (!same(before.settings, after.settings)) {
     writes.push(db.collection<Document>("site").replaceOne({ _id: "settings" } as Document, { ...after.settings }, { upsert: true }));
   }
-  if (!same(before.mail, after.mail)) {
+  for (const key of SINGLETONS) {
+    if (same(before[key], after[key])) continue;
+    const value = after[key];
     writes.push(
-      after.mail
-        ? db.collection<Document>("site").replaceOne({ _id: "mail" } as Document, { ...after.mail }, { upsert: true })
-        : db.collection<Document>("site").deleteOne({ _id: "mail" } as Document),
+      value
+        ? db.collection<Document>("site").replaceOne({ _id: key } as Document, { ...value }, { upsert: true })
+        : db.collection<Document>("site").deleteOne({ _id: key } as Document),
     );
   }
   if (before.version !== after.version || !same(before.partners, after.partners)) {
@@ -256,9 +264,19 @@ export const mongoStore: DataStore = {
   readDb,
   readContent: async () => (await snapshot(CONTENT_KEYS)) as unknown as ContentSnapshot,
   mutateDb,
+  readSecurity: async () => {
+    const doc = await (await database()).collection<SiteDoc>("site").findOne({ _id: "security" });
+    if (!doc) return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { _id, ...fields } = doc;
+    return fields as unknown as Database["security"];
+  },
   ping: async () => {
     await (await database()).command({ ping: 1 });
   },
 };
+
+/** Shared connection for other server modules (e.g. the rate limiter). */
+export const mongoDatabase = database;
 
 export const mongoDbName = dbName;

@@ -19,6 +19,7 @@ import {
   Mail,
   MailCheck,
   MessageCircle,
+  ShieldCheck,
   Upload,
 } from "lucide-react";
 import { Modal } from "@/components/admin/Overlay";
@@ -78,6 +79,7 @@ export function CommandPalette() {
       { id: "enquiries", label: "Counselling requests", group: "Navigate", icon: <Inbox />, keywords: "enquiries leads inbox counselling calls", run: go("/admin/enquiries") },
       { id: "content", label: "Content", group: "Navigate", icon: <FileText />, keywords: "courses plans pricing instructors batches faq stories", run: go("/admin/content") },
       { id: "settings", label: "Settings", group: "Navigate", icon: <Settings />, keywords: "contact socials", run: go("/admin/settings") },
+      { id: "security", label: "Security", group: "Navigate", icon: <ShieldCheck />, keywords: "2fa two-step authenticator password sessions sign out checklist", run: go("/admin/security") },
       { id: "email", label: "Email notifications", group: "Navigate", icon: <Mail />, keywords: "smtp mail notifications gmail credentials sender", run: go("/admin/email") },
       { id: "smtp", label: "Change SMTP credentials", group: "Actions", icon: <MailCheck />, keywords: "email password host server mail", run: go("/admin/email#smtp") },
       { id: "mail-log", label: "View email delivery log", group: "Actions", icon: <Mail />, keywords: "sent failed bounce notifications", run: go("/admin/email#log") },

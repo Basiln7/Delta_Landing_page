@@ -5,7 +5,7 @@ import { readDb } from "@/lib/db";
 import { deliver, MailConfigError, withDefaults } from "@/lib/mail/send";
 import { draftSmtpConfig } from "@/lib/mail/settings";
 import { testEmail } from "@/lib/mail/templates";
-import { rateLimit } from "@/lib/rate-limit";
+import { consume, LIMITS } from "@/lib/security/rate-limit";
 
 /**
  * Send a real test email. Uses the unsaved form values when `settings` is given, otherwise the saved ones.
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (denied) return denied;
 
   const session = await getSession();
-  const limit = rateLimit(`mail-test:${session?.email}`, 5, 60_000);
+  const limit = await consume(LIMITS.mailTest(session?.email ?? "admin"));
   if (!limit.ok) {
     return NextResponse.json({ error: `Too many test emails — try again in ${limit.retryAfter}s.` }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }

@@ -158,6 +158,61 @@ The end-to-end suite runs against a local capture SMTP server. It covers:
 
 See README → Email notifications.
 
+## 5d. Security hardening (2026-11-05)
+
+**Goal:** before real money and real learner data, close the gaps an attacker would try first. This builds on the controls already in place: signed httpOnly session, Razorpay HMAC checks, webhook de-duplication, encrypted SMTP password and escaped email input.
+
+### Audit findings
+| # | Finding | Risk |
+|---|---|---|
+| F1 | Session secret falls back to a hard-coded value, and the same value is in `.env.example` (and was copied into `.env.local`) | Anyone with the repo can forge an admin cookie on a server using it |
+| F2 | No limit on login attempts | Password brute force |
+| F3 | No limits on the public enquiry form, checkout or payment callbacks | Spam, and "email bombing" (our SMTP sends confirmations to any address typed in) |
+| F4 | No security headers (CSP, HSTS, framing, nosniff, referrer, permissions) | XSS impact, clickjacking, downgrade |
+| F5 | Password-only admin login; 7-day stateless sessions with no way to revoke | A stolen password or cookie means full control |
+| F6 | No Origin check on state-changing APIs | CSRF (partly mitigated by SameSite=Lax) |
+| F7 | Request bodies unbounded on public JSON endpoints | Memory exhaustion |
+| F8 | Demo checkout marks orders **paid** when Razorpay keys are missing, even in production | Free "paid" orders and receipts after a misconfigured deploy |
+| F9 | Uploads trust the browser's file type | Disguised files in the media library |
+| F10 | `/api/health` and the login screen reveal internals (DB name, where the demo credentials are) | Reconnaissance |
+
+### Design
+- **Secrets (F1):** no hard-coded secret. In development, a missing `SESSION_SECRET` becomes a random per-process key. In production the app fails closed on:
+  - a missing, short (<32 chars) or known-placeholder secret
+  - a placeholder or weak `ADMIN_PASSWORD`
+
+  Optional `ADMIN_PASSWORD_HASH` (scrypt) keeps the plaintext password out of the environment.
+- **Rate limits (F2, F3):** fixed-window counters stored in MongoDB (`rate_limits`, cleaned up by a TTL index), so limits hold across restarts and multiple servers. In-memory fallback without Mongo.
+  - Login: failures per IP and per account.
+  - 2FA codes: per ticket and per IP.
+  - Enquiries: per IP and **per recipient email**.
+  - Checkout, payment callbacks, test emails and connection checks: per IP or per admin.
+- **Headers (F4):**
+  - Admin: strict CSP with a per-request nonce + `strict-dynamic`, set in `proxy.ts`.
+  - Public site: a CSP without nonces (keeps the page static/ISR), with third parties limited to Razorpay and Unsplash.
+  - Everywhere: HSTS (production), `frame-ancestors 'none'`/X-Frame-Options, nosniff, strict referrer, a locked-down Permissions-Policy, COOP; `noindex` on /admin and /api.
+- **2FA + sessions (F5):** TOTP (RFC 6238, any authenticator app) with 10 single-use recovery codes, stored hashed.
+  - Login is two steps: password, then a signed 5-minute ticket that only the code step accepts.
+  - Codes can't be replayed (last used time-step is stored).
+  - Sessions are 12 h, carry a `sessionVersion`, and "Sign out everywhere" revokes all of them.
+  - The cookie is `__Host-` prefixed in production.
+- **CSRF (F6):** `proxy.ts` rejects cross-site POST/PUT/PATCH/DELETE to `/api/*` (Origin / Sec-Fetch-Site). The signed Razorpay webhook is exempt.
+- **Body caps (F7):** public JSON endpoints read at most a few KB (413 otherwise).
+- **Demo checkout (F8):** disabled in production unless `ALLOW_DEMO_CHECKOUT=true`.
+- **Uploads (F9):** file signature (magic bytes) must match the declared type; SVGs with scripts or event handlers are rejected.
+- **Recon (F10):**
+  - Public health check returns only `ok` and latency; details for admins.
+  - The demo-credentials hint is shown in development only.
+- **Testing:** an attack script runs against the running app (brute force, forged and tampered cookies, CSRF, flooding, oversized bodies, 2FA replay, recovery codes, revocation, disguised uploads). A production build is checked for headers and for zero CSP violations in the browser.
+
+### Status: built ✓ (2026-11-05)
+F1–F10 are fixed. The attack suite passes against a production build (57/57) and in development (56/56). The email suite still passes (39/39). npm audit: 0 vulnerabilities in production dependencies.
+
+Found and fixed during testing:
+- **Logout bug:** in production, logout didn't remove the `__Host-` session cookie. Browsers ignore a deletion that lacks `Secure`, which a plain `cookies().delete()` omits. Cookies are now expired with their original attributes, and the attack suite enforces browser cookie-prefix rules so this can't regress.
+- **2FA cache in dev:** right after 2FA was turned off, the login route still saw the cached "2FA on" state. Security decisions now read fresh state, and the short cache is process-wide.
+- **Recovery-codes dialog:** it could trap an admin if the browser blocks the clipboard. A "written them down" fallback was added.
+
 ## 6. Before launch
 - Replace mock mentors, testimonials, prices; confirm email; upload brochure.
 - MongoDB Atlas (with backups) in production; Razorpay live keys + live webhook (README → Payments).

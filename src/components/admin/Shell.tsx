@@ -16,6 +16,7 @@ import {
   ReceiptText,
   Search,
   Settings,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { DeltaMark } from "@/components/brand/Logo";
@@ -33,6 +34,7 @@ const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badgeKey
   { href: "/admin/content", label: "Content", icon: FileText },
   { href: "/admin/media", label: "Media", icon: ImageIcon },
   { href: "/admin/email", label: "Email", icon: Mail },
+  { href: "/admin/security", label: "Security", icon: ShieldCheck },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 

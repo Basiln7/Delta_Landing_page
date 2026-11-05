@@ -30,7 +30,7 @@ npm run dev
 
 ```
 src/app/(site)/        landing page (server component reading the data store)
-src/app/admin/         admin panel (login, overview, orders, enquiries, content, media, email, settings)
+src/app/admin/         admin panel (login + 2FA, overview, orders, enquiries, content, media, email, security, settings)
 src/app/api/           public enquiry endpoint, auth, admin REST API
 src/app/uploads/       serves uploaded files from storage/uploads
 src/components/site/   landing sections (Hero + MarketChart, TickerTape, Flagship, Projects, Courses, Pricing, cart/, ...)
@@ -39,6 +39,8 @@ src/components/admin/  admin UI kit
 src/data/seed.ts       ALL mock data (copy, people, events, media) — edit here or through the admin
 src/lib/db/            data layer: index.ts (API) → mongo-store.ts (MongoDB) or json-store.ts (local file)
 src/lib/mail/          SMTP email: transport, templates, delivery log, notification triggers
+src/lib/security/      rate limits, TOTP 2FA, CSP/headers, request guards, upload checks
+src/proxy.ts           CSRF origin check for /api, nonce CSP for /admin
 storage/               uploads/ (+ db.json when MongoDB isn't configured) — gitignored
 ```
 
@@ -123,6 +125,60 @@ Each email can be switched off on its own, and **Preview** shows it with sample 
 
 Run any local SMTP catcher on port 1025/2525 (for example [Mailpit](https://mailpit.axllent.org/)). In Admin → Email, set host `127.0.0.1`, that port, and security **None (local testing only)**. Every email then lands in the catcher's inbox instead of being delivered.
 
+## Security
+
+What protects the site and the admin, and what the server must be given before launch. **Admin → Security** shows a live checklist of the items below.
+
+### Admin sign-in
+- **Two-step verification** (Admin → Security): after the password, a 6-digit code from an authenticator app (Google/Microsoft Authenticator, 1Password, …).
+  - The secret is stored encrypted, and a code can't be reused.
+  - 10 single-use recovery codes are shown once and stored hashed.
+  - Turning 2FA off or replacing the codes needs a current code.
+- **Sessions** last 12 hours.
+  - The cookie is httpOnly, signed with HMAC-SHA256, and named `__Host-delta_admin` in production (HTTPS only, can't be set by subdomains).
+  - Every request checks a session version, so **Sign out everywhere else**, enabling 2FA and disabling 2FA revoke all other sessions immediately.
+- **Brute-force limits:** 10 failed passwords per IP per 15 minutes, and 30 per account per hour (stops slow distributed guessing). Five wrong 2FA codes burn the sign-in attempt.
+- **Credentials:**
+  - Production refuses a missing, short or placeholder `SESSION_SECRET`, and the demo or any <12-character `ADMIN_PASSWORD`.
+  - Prefer `ADMIN_PASSWORD_HASH` (scrypt) so the password itself is never in the environment:
+    ```bash
+    npm run hash-password
+    ```
+
+### Rate limits (MongoDB-backed, shared by all server instances)
+| Endpoint | Limit |
+|---|---|
+| Sign-in | 10 failures / IP / 15 min · 30 failures / account / hour |
+| 2FA code | 5 tries per sign-in · 20 / IP / 15 min |
+| Enquiry form | 5 / IP / 10 min · **3 / recipient email / hour** (it sends a confirmation email, so this stops our mail server being used to flood someone's inbox) |
+| Checkout | 15 / IP / 10 min |
+| Payment callbacks | 40 / IP / 10 min |
+| Test email · SMTP check · 2FA changes | 5 / min · 10 / min · 10 / 10 min per admin |
+
+Counters live in the `rate_limits` collection and expire on their own (TTL index). Without MongoDB they're kept in memory. **Run behind a proxy that sets the client IP** (`X-Real-IP` / `X-Forwarded-For`, which Vercel, Cloudflare and Nginx do), or every visitor shares one IP bucket.
+
+### Browser protections
+- **Content-Security-Policy:**
+  - The admin gets a strict policy: scripts only with a per-request nonce + `strict-dynamic` (set in `src/proxy.ts`).
+  - The public site stays statically generated for speed, so its policy can't use nonces. Instead it allows only our own scripts plus Razorpay Checkout, and blocks plugins, `<base>` hijacking, foreign form targets and framing.
+- **Other headers:** HSTS (2 years, preload-ready, production only), `X-Frame-Options: DENY`, `nosniff`, `strict-origin-when-cross-origin` referrer, a locked-down `Permissions-Policy`, and COOP. `/admin` and `/api` are `noindex`.
+- **CSRF:** cross-site POST/PUT/PATCH/DELETE to `/api/*` is rejected by Origin / `Sec-Fetch-Site`, on top of the SameSite cookie. The Razorpay webhook is exempt; its HMAC signature authenticates it.
+
+### Data and uploads
+- Public JSON endpoints read at most a few KB (413 above that).
+- Uploads are checked by their **actual bytes** (magic numbers), not the browser's claim. SVGs containing scripts or event handlers are rejected. Uploaded SVGs are also served with a sandboxing CSP.
+- SMTP password and 2FA secret are encrypted with AES-256-GCM (`CREDENTIALS_ENCRYPTION_KEY`). Recovery codes are hashed. None of them are ever returned to the browser.
+- **Demo checkout is off in production** unless `ALLOW_DEMO_CHECKOUT=true`, so a deploy that forgot its Razorpay keys can't create "paid" orders without payment.
+- `/api/health` gives the public only `ok` and latency; database details are for signed-in admins.
+
+### If a secret leaks
+| What leaked | Do this |
+|---|---|
+| `SESSION_SECRET` | Set a new random value and redeploy. Every session is signed out. |
+| `CREDENTIALS_ENCRYPTION_KEY` | Set a new key, re-enter the SMTP password, and turn 2FA off and on again (the old secret can't be decrypted). |
+| Admin password | Change `ADMIN_PASSWORD_HASH`, then Admin → Security → **Sign out everywhere else**. |
+| Razorpay keys | Regenerate them in the Razorpay dashboard. |
+
 ## Buying a course
 
 1. Add courses (or a membership plan) to the cart — the cart persists in the browser.
@@ -189,6 +245,8 @@ In **Admin → Orders**, a paid Razorpay order shows **Refund via Razorpay**. Th
 - [ ] Generate **Live** keys (`rzp_live_…`) and add them as server-side environment variables on your host — never commit them, never prefix them with `NEXT_PUBLIC_`.
 - [ ] Create a **separate webhook in Live Mode** with its own secret.
 - [ ] Serve the site over HTTPS and set `NEXT_PUBLIC_SITE_URL` (also used for links in emails).
+- [ ] Set a random `SESSION_SECRET` (48+ chars) and `ADMIN_PASSWORD_HASH` (`npm run hash-password`); remove `ADMIN_PASSWORD`.
+- [ ] Sign in and turn on **two-step verification** (Admin → Security); store the recovery codes safely. The Launch checklist there should be all green.
 - [ ] Set a dedicated `CREDENTIALS_ENCRYPTION_KEY`, configure SMTP in Admin → Email, and set up SPF/DKIM/DMARC for your sending domain so receipts don't land in spam.
 - [ ] Do one small real payment and one refund end to end; reconcile with the Razorpay dashboard.
 - [ ] Replace the demo coupons in `src/lib/commerce.ts` with coupons managed in the database.

@@ -320,6 +320,24 @@ export interface MailLogEntry {
   ref?: string;
 }
 
+/** Admin account security state (single admin). Private: never part of public content. */
+export interface AdminSecurity {
+  /** Bumped by "sign out everywhere" and by 2FA changes; sessions carrying an older value are rejected. */
+  sessionVersion: number;
+  totp?: {
+    /** AES-256-GCM encrypted base32 secret (see lib/secrets) */
+    secretEnc: string;
+    enabledAt: string;
+    /** last accepted time-step — codes at or before it are rejected (no replay) */
+    lastStep?: number;
+  };
+  /** secret generated during setup, waiting for the first valid code */
+  totpPending?: { secretEnc: string; createdAt: string };
+  /** SHA-256 hashes of single-use recovery codes */
+  recoveryCodes?: { hash: string; usedAt?: string }[];
+  updatedAt?: string;
+}
+
 export interface Database {
   version: number;
   settings: SiteSettings;
@@ -343,6 +361,7 @@ export interface Database {
   processedEvents?: ProcessedEvent[];
   mail?: MailSettings;
   mailLog?: MailLogEntry[];
+  security?: AdminSecurity;
 }
 
 /** Collections editable through the generic admin collection editor. */
@@ -364,4 +383,4 @@ export const EDITABLE_COLLECTIONS = [
 export type EditableCollection = (typeof EDITABLE_COLLECTIONS)[number];
 
 /** Everything the public landing page needs (no enquiries or orders). */
-export type SiteContent = Omit<Database, "enquiries" | "orders" | "processedEvents" | "mail" | "mailLog" | "version">;
+export type SiteContent = Omit<Database, "enquiries" | "orders" | "processedEvents" | "mail" | "mailLog" | "security" | "version">;
