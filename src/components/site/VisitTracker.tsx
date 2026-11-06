@@ -43,9 +43,11 @@ export function VisitTracker() {
       if (typeof window.requestIdleCallback === "function") idleId = window.requestIdleCallback(send, { timeout: 2000 });
       else timer = window.setTimeout(send, 1000);
     };
-    // Someone who leaves before the idle moment still counts (keepalive lets the request outlive the page).
-    window.addEventListener("pagehide", send);
     const afterLoad = () => {
+      if (cancelled) return;
+      // Someone who leaves before the idle moment still counts (keepalive lets the request outlive the page).
+      // Only armed once the page is really shown, so a discarded prerender never sends anything.
+      window.addEventListener("pagehide", send);
       if (document.readyState === "complete") schedule();
       else window.addEventListener("load", schedule, { once: true });
     };

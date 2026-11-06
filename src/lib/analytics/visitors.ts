@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import type { Collection } from "mongodb";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { readSignedValue, signValue } from "@/lib/auth";
 import { mongoDatabase } from "@/lib/db/mongo-store";
 
@@ -105,12 +105,16 @@ export async function recordVisit(v: VisitInput) {
   const day = dayKey(now);
   const vid = storedId(v.visitorId);
 
-  const visitor = await visitors.findOneAndUpdate(
+  const before = await visitors.findOneAndUpdate(
     { _id: vid },
     { $setOnInsert: { firstSeen: now, firstDay: day }, $set: { lastSeen: now, ...(v.staff ? { staff: true } : {}) } },
-    { upsert: true, returnDocument: "after" },
+    { upsert: true, returnDocument: "before" },
   );
+  const registered = Boolean(before?.registered);
+  const staff = v.staff || Boolean(before?.staff);
 
+  // Flags only ever go false → true here: a concurrent markVisitorRegistered (or staff sign-in)
+  // must never be overwritten by this request's slightly older read.
   await visits.updateOne(
     { _id: `${day}:${vid}` },
     {
@@ -124,12 +128,17 @@ export async function recordVisit(v: VisitInput) {
         expireAt: new Date(now.getTime() + RETENTION_MS),
         ...(v.referrer ? { referrer: v.referrer } : {}),
         ...(v.utm ? { utm: v.utm } : {}),
+        ...(registered ? {} : { registered: false }),
+        ...(staff ? {} : { staff: false }),
       },
-      $set: { lastAt: now, registered: Boolean(visitor?.registered), staff: Boolean(visitor?.staff) },
+      $set: { lastAt: now, ...(registered ? { registered: true } : {}), ...(staff ? { staff: true } : {}) },
       $inc: { pageviews: 1 },
     },
     { upsert: true },
   );
+
+  // First time an admin is seen on this device: drop its earlier days from the month and chart too.
+  if (v.staff && !before?.staff) await visits.updateMany({ vid, staff: { $ne: true } }, { $set: { staff: true } });
 }
 
 /** A checkout or enquiry came from this device: count it as Registered from now on (today included). */
@@ -137,19 +146,34 @@ export async function markVisitorRegistered(visitorId: string) {
   if (!trackingAvailable()) return;
   const { visitors, visits } = await collections();
   const now = new Date();
+  const day = dayKey(now);
   const vid = storedId(visitorId);
-  const r = await visitors.updateOne({ _id: vid }, { $set: { registered: true }, $min: { registeredAt: now } });
-  if (r.matchedCount) await visits.updateOne({ _id: `${dayKey(now)}:${vid}` }, { $set: { registered: true } });
+  // Upsert: the cookie is signed by us, so this is a real device even if its first ping's write
+  // hasn't landed yet (form sent within moments of the page loading).
+  await visitors.updateOne(
+    { _id: vid },
+    { $set: { registered: true }, $min: { registeredAt: now }, $setOnInsert: { firstSeen: now, firstDay: day, lastSeen: now } },
+    { upsert: true },
+  );
+  await visits.updateOne({ _id: `${day}:${vid}` }, { $set: { registered: true } });
 }
 
 /**
  * For checkout / enquiry route handlers: read this request's visitor cookie now, and mark the device
- * Registered after the response is sent (never slows the form down, never fails it).
+ * Registered after the response is sent. Never slows the form down and never throws, so a saved
+ * enquiry or order can't turn into an error. Honours Global Privacy Control / Do Not Track.
  */
 export async function registerVisitorAfterResponse(schedule: (task: () => Promise<void>) => void) {
-  const id = readVisitorId((await cookies()).get(VISITOR_COOKIE)?.value);
-  if (!id || !trackingAvailable()) return;
-  schedule(() => markVisitorRegistered(id).catch((err) => console.error("[visitors] could not mark a visitor registered", err)));
+  try {
+    if (!trackingAvailable()) return;
+    const h = await headers();
+    if (h.get("sec-gpc") === "1" || h.get("dnt") === "1") return;
+    const id = readVisitorId((await cookies()).get(VISITOR_COOKIE)?.value);
+    if (!id) return;
+    schedule(() => markVisitorRegistered(id).catch((err) => console.error("[visitors] could not mark a visitor registered", err)));
+  } catch (err) {
+    console.error("[visitors] could not read the visitor cookie", err);
+  }
 }
 
 /* ───────────────────────── admin stats ───────────────────────── */

@@ -290,6 +290,29 @@ Found and fixed during testing:
 - The home page is still statically generated (`○ /`, revalidated every 5 minutes). In the browser the ping fires once, after the load event, with no console or CSP errors, and the cookie can't be read by page scripts.
 - Found and fixed during testing: on a slow load the idle callback could wait several seconds, so quick visitors might never be counted. The ping now also goes out when the visitor leaves (`pagehide` with `keepalive`), and the idle wait is capped at 2 s.
 
+### Second test round (2026-11-06)
+- **Ways tested:** independent code review; typecheck and lint; a new 96-check stress suite run against development and production; real browser on desktop and mobile; the production build with MongoDB switched off.
+- **Stress suite covers:**
+  - 60 simultaneous pings from one device, and 40 new devices at once.
+  - Both rate limits under parallel bursts.
+  - 30+ malformed or hostile bodies: Mongo operators, unknown keys, oversized and streamed bodies, wrong methods, and referrer and UTM cleaning.
+  - Cookie tampering, 12 real browsers / in-app browsers and 9 bots.
+  - Registration through enquiry and demo checkout.
+  - Staff exclusion, and the Overview KPIs against synthetic history: month, all-time, new today, and the 14-day window edges.
+  - Response time.
+- **Fixed** (the review predicted these and the suite reproduced them before the fix):
+  - A device's earlier days stayed in the month and chart after an admin signed in on it. Now they're dropped too.
+  - A tracker ping could flip today's visit from Registered back to Other in a race. Flags now only ever go false → true.
+  - An enquiry arriving before the device's first record was written didn't mark it Registered. It now does.
+  - Enquiries and checkout ignored Global Privacy Control / Do Not Track. They're now honoured.
+  - The registration step could turn a saved enquiry or order into an error. It now never throws.
+  - A prerendered page that was never shown could send a ping when discarded.
+- **Retuned:** limits raised to 600 hits / 10 min and 200 new devices / hour per IP, so shared IPs (college or office Wi-Fi, mobile networks) aren't undercounted.
+- **Results:**
+  - Development: stress 96/96, visitors 27/27, security and users all pass.
+  - Production: stress 96/96 (with demo checkout allowed for the test), visitors 27/27, security 57/57 (demo checkout correctly refused), users 57/57. Without MongoDB: site, forms and admin work, tracking is a no-op, and the Overview shows the "needs MongoDB" card.
+  - Production timing: page loaded ≈0.5 s, ping ≈2 s after load, the request itself ≈20 ms; p95 16 ms over 100 pings. A visitor leaving after 1.3 s is still counted.
+
 ## 6. Before launch
 - Replace mock mentors, testimonials, prices; confirm email; upload brochure.
 - MongoDB Atlas (with backups) in production; Razorpay live keys + live webhook (README → Payments).

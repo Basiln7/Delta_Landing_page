@@ -151,14 +151,15 @@ The rules are enforced by the server on every API route and page; the menu just 
 
 ## Visitor stats (unique visitors)
 
-Admin → Overview shows **unique visitors** today, this month and all time, **new visitors** today, a 14-day chart, and today's split into **Registered** (the device has sent an enquiry or started a checkout) and **Other**. Days are counted in India time. Signed-in admins' devices are never counted. Needs MongoDB; without it nothing is tracked.
+Admin → Overview shows **unique visitors** today, this month and all time, **new visitors** today, a 14-day chart, and today's split into **Registered** (the device has sent an enquiry or started a checkout) and **Other**. Days are counted in India time. Signed-in admins' devices are never counted: once an admin signs in on a device, its earlier days are dropped from the month and chart too. Needs MongoDB; without it nothing is tracked and the Overview says so.
 
 How it works:
 - **Front end:** `<VisitTracker />` in the public layout renders nothing and adds no styles. After the page has loaded and the browser is idle (or when the visitor leaves, whichever is first), it sends one fire-and-forget `POST /api/track-visit` with the path, referrer and UTM tags. The home page stays statically generated.
 - **Device ID:** a random ID in a first-party cookie `delta_vid` set by the server: httpOnly, `SameSite=Lax`, `Secure` in production, 400 days, and `Path=/api`, so it travels only with API calls.
   - It's HMAC-signed, so invented IDs are treated as new devices, and new devices are rate-limited per IP: the counts can't be inflated by faking cookies.
-  - Checkout and enquiries read the same cookie to mark the device Registered. Those forms didn't change.
-- **Ignored:** bots, browsers sending Global Privacy Control or Do Not Track, automated browsers, and prerendered pages that are never shown.
+  - Checkout and enquiries read the same cookie to mark the device Registered. Those forms didn't change, and this step can never make them fail.
+  - The signature uses `SESSION_SECRET`. Changing that secret signs every admin out **and** resets visitor IDs: returning visitors count as new once.
+- **Ignored:** bots, browsers sending Global Privacy Control or Do Not Track (also when they send an enquiry or check out), automated browsers, and prerendered pages that are never shown.
 - **Stored** (`visitors` and `visits` collections): a hash of the device ID, first/last seen, one record per device per day with page views, landing path, referring site (host only), UTM tags and device type (mobile/tablet/desktop).
   - **Not stored:** IP addresses, user agents, names or emails. "Registered" is just a flag; no order or enquiry is linked to the device.
   - Daily visit records expire after 400 days.
@@ -195,7 +196,7 @@ What protects the site and the admin, and what the server must be given before l
 | Payment callbacks | 40 / IP / 10 min |
 | Test email · SMTP check · 2FA / password changes | 5 / min · 10 / min · 10 / 10 min per admin |
 | User management | 30 changes / 10 min per super admin |
-| Visitor tracking | 120 hits / IP / 10 min · 30 new devices / IP / hour |
+| Visitor tracking | 600 hits / IP / 10 min · 200 new devices / IP / hour (generous: many visitors can share one IP on office Wi-Fi or mobile networks) |
 | Invite / reset links | 20 checks / IP / 15 min (stops link guessing) |
 
 Counters live in the `rate_limits` collection and expire on their own (TTL index). Without MongoDB they're kept in memory. **Run behind a proxy that sets the client IP** (`X-Real-IP` / `X-Forwarded-For`, which Vercel, Cloudflare and Nginx do), or every visitor shares one IP bucket.
