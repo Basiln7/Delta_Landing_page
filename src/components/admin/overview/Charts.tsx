@@ -44,12 +44,15 @@ export function AreaChart({
   currency = DEFAULT_CURRENCY,
   unit = ["enquiry", "enquiries"],
   id = "area",
+  period = "week",
 }: {
   data: { label: string; value: number }[];
   format?: "count" | "currency";
   currency?: Currency;
   unit?: [string, string];
   id?: string;
+  /** what one data point covers (screen-reader caption) */
+  period?: "week" | "day";
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const isMoney = format === "currency";
@@ -85,7 +88,9 @@ export function AreaChart({
   return (
     <figure className="relative">
       <figcaption className="sr-only">
-        Weekly totals over the last {data.length} weeks: {data.map((d) => `${d.label}: ${full(d.value)}`).join(", ")}. Total {full(total)}.
+        {period === "day"
+          ? `Per day over the last ${data.length} days: ${data.map((d) => `${d.label}: ${full(d.value)}`).join(", ")}.`
+          : `Weekly totals over the last ${data.length} weeks: ${data.map((d) => `${d.label}: ${full(d.value)}`).join(", ")}. Total ${full(total)}.`}
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full overflow-visible" role="img" aria-hidden>
         <defs>

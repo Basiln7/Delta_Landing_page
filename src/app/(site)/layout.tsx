@@ -1,6 +1,7 @@
 import { MotionProvider } from "@/components/motion/MotionProvider";
 import { ScrollProgress } from "@/components/motion/ScrollProgress";
 import { PageReady } from "@/components/motion/PageReady";
+import { VisitTracker } from "@/components/site/VisitTracker";
 
 /**
  * Finance landing shell — motion restraint by design (see plan.md §1 #8):
@@ -18,6 +19,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
         </a>
         <PageReady />
         <ScrollProgress />
+        <VisitTracker />
         {children}
       </div>
     </MotionProvider>

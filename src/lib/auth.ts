@@ -82,6 +82,22 @@ export function safeEqual(a: string, b: string) {
   return timingSafeEqual(ha, hb);
 }
 
+/** `value.signature` for a small non-session value (e.g. the visitor cookie). Domain-separated by purpose. */
+export function signValue(purpose: string, value: string) {
+  return `${value}.${sign(purpose, value)}`;
+}
+
+/** The value inside a `signValue` token, or null when it's missing, malformed or the signature doesn't match. */
+export function readSignedValue(purpose: string, token: string | undefined | null): string | null {
+  if (!token || token.length > 256) return null;
+  const i = token.lastIndexOf(".");
+  if (i <= 0) return null;
+  const value = token.slice(0, i);
+  const expected = Buffer.from(sign(purpose, value));
+  const given = Buffer.from(token.slice(i + 1));
+  return expected.length === given.length && timingSafeEqual(expected, given) ? value : null;
+}
+
 function issue(purpose: string, data: object) {
   const payload = b64url(JSON.stringify(data));
   return `${payload}.${sign(purpose, payload)}`;

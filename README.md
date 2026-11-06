@@ -39,6 +39,7 @@ src/components/admin/  admin UI kit
 src/data/seed.ts       ALL mock data (copy, people, events, media) — edit here or through the admin
 src/lib/db/            data layer: index.ts (API) → mongo-store.ts (MongoDB) or json-store.ts (local file)
 src/lib/mail/          SMTP email: transport, templates, delivery log, notification triggers
+src/lib/analytics/     unique-visitor tracking + the Overview's visitor stats
 src/lib/security/      admin users + roles (users.ts, owner.ts), rate limits, TOTP 2FA, CSP/headers, request guards, upload checks
 src/proxy.ts           CSRF origin check for /api, nonce CSP for /admin
 storage/               uploads/ (+ db.json when MongoDB isn't configured) — gitignored
@@ -148,6 +149,22 @@ The rules are enforced by the server on every API route and page; the menu just 
   db.admin_users.updateOne({ _id: "owner" }, { $unset: { totp: "", totpPending: "", recoveryCodes: "" }, $inc: { sessionVersion: 1 } })
   ```
 
+## Visitor stats (unique visitors)
+
+Admin → Overview shows **unique visitors** today, this month and all time, **new visitors** today, a 14-day chart, and today's split into **Registered** (the device has sent an enquiry or started a checkout) and **Other**. Days are counted in India time. Signed-in admins' devices are never counted. Needs MongoDB; without it nothing is tracked.
+
+How it works:
+- **Front end:** `<VisitTracker />` in the public layout renders nothing and adds no styles. After the page has loaded and the browser is idle (or when the visitor leaves, whichever is first), it sends one fire-and-forget `POST /api/track-visit` with the path, referrer and UTM tags. The home page stays statically generated.
+- **Device ID:** a random ID in a first-party cookie `delta_vid` set by the server: httpOnly, `SameSite=Lax`, `Secure` in production, 400 days, and `Path=/api`, so it travels only with API calls.
+  - It's HMAC-signed, so invented IDs are treated as new devices, and new devices are rate-limited per IP: the counts can't be inflated by faking cookies.
+  - Checkout and enquiries read the same cookie to mark the device Registered. Those forms didn't change.
+- **Ignored:** bots, browsers sending Global Privacy Control or Do Not Track, automated browsers, and prerendered pages that are never shown.
+- **Stored** (`visitors` and `visits` collections): a hash of the device ID, first/last seen, one record per device per day with page views, landing path, referring site (host only), UTM tags and device type (mobile/tablet/desktop).
+  - **Not stored:** IP addresses, user agents, names or emails. "Registered" is just a flag; no order or enquiry is linked to the device.
+  - Daily visit records expire after 400 days.
+- **Queries:** `src/lib/analytics/visitors.ts` → `visitorStats()`. Indexed counts on `visits.day`, `visits.month+vid` and `visitors.firstDay`; the month figure groups that month's visits by device.
+- **Privacy:** mention this first-party analytics cookie in your privacy policy. If you get visitors from the EU/UK, ask your lawyer whether a cookie consent banner is needed there.
+
 ## Security
 
 What protects the site and the admin, and what the server must be given before launch. **Admin → Security** shows a live checklist of the items below.
@@ -178,6 +195,7 @@ What protects the site and the admin, and what the server must be given before l
 | Payment callbacks | 40 / IP / 10 min |
 | Test email · SMTP check · 2FA / password changes | 5 / min · 10 / min · 10 / 10 min per admin |
 | User management | 30 changes / 10 min per super admin |
+| Visitor tracking | 120 hits / IP / 10 min · 30 new devices / IP / hour |
 | Invite / reset links | 20 checks / IP / 15 min (stops link guessing) |
 
 Counters live in the `rate_limits` collection and expire on their own (TTL index). Without MongoDB they're kept in memory. **Run behind a proxy that sets the client IP** (`X-Real-IP` / `X-Forwarded-For`, which Vercel, Cloudflare and Nginx do), or every visitor shares one IP bucket.

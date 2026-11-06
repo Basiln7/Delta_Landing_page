@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { registerVisitorAfterResponse } from "@/lib/analytics/visitors";
 import { mutateDb } from "@/lib/db";
 import { notifyOrderPaid } from "@/lib/mail/notify";
 import { demoCheckoutAllowed } from "@/lib/security/policy";
@@ -76,6 +77,8 @@ export async function POST(req: Request) {
   }
 
   revalidatePath("/admin", "layout");
+  // Visitor stats: the person shared their details at checkout, so this device counts as Registered.
+  await registerVisitorAfterResponse(after);
 
   if (!rzp.enabled) {
     after(() => notifyOrderPaid(order.id)); // demo orders are paid on creation

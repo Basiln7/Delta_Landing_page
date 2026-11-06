@@ -263,6 +263,33 @@ Found and fixed during testing:
 - **Redirect status:** a page redirect after the admin layout starts streaming arrives as an in-page redirect (HTTP 200), not a 307. Admins still never receive super-admin data: the role check runs before any data is loaded, and the suite asserts nothing leaks.
 - **Layout:** the users table was too narrow at 1440 px next to the side cards; the cards moved below it.
 
+## 5f. Unique visitor tracking (2026-11-06)
+
+**Goal:** count unique visitors (today, this month, all time) and split them into **Registered** (people who shared their details through checkout or an enquiry) and **Other** (anonymous), shown on the admin Overview. First-party only: no third-party analytics, no extra page weight, no layout change.
+
+### Design
+- **Device ID:** a random 128-bit ID in a first-party cookie `delta_vid`, set by the server on the first tracked visit.
+  - The cookie is httpOnly, `SameSite=Lax`, `Secure` in production, 400 days, and `Path=/api`, so it only travels with API calls (never with pages or assets).
+  - It's HMAC-signed with the session secret, so made-up IDs are treated as new visitors and hit the new-visitor rate limit; nobody can inflate the counts by inventing cookies.
+  - It's server-set rather than generated in `localStorage`: scripts can't read or tamper with it, and checkout and enquiries can link it without changing those forms.
+- **Front end:** `<VisitTracker />` in the public layout renders nothing. After the page has loaded and the browser is idle, it sends one `fetch(…, { keepalive: true })` to `POST /api/track-visit` with the path, referrer and UTM tags. No styles, no DOM, no globals, no waiting on the response.
+  - It skips browsers that ask not to be tracked (Global Privacy Control / Do Not Track), automated browsers (`navigator.webdriver`) and pages prerendered but never shown.
+- **Endpoint:** same-origin only (existing CSRF check), 1 KB body cap, validated input, bot user agents ignored, rate-limited per IP (all hits, and new visitors separately). It answers `204` at once; database writes run after the response.
+  - Signed-in admins are flagged as **staff** and left out of every count.
+- **Data (MongoDB):**
+  - `visitors`: one tiny document per device: hashed ID, first/last seen, `registered` and `staff` flags.
+  - `visits`: one document per device per day (`day:hashedId`), with page views, first path, referrer host, UTM tags, device type (mobile/tablet/desktop) and the flags. Expires after 400 days (TTL).
+  - Stored: no IP address, no raw user agent, no personal details. "Registered" is just a flag; the visitor record never holds an order, email or name.
+- **Registered:** when a checkout or enquiry is submitted, the request's visitor cookie is marked registered (after the response).
+- **Days are in India time** (Asia/Kolkata).
+- **Admin:** Overview shows unique visitors today / this month / all time, today's Registered vs Other split, new visitors today, and a 14-day chart. Without MongoDB the endpoint does nothing and the card explains why.
+- **Testing:** cookie flags and signature, forged cookies, cross-site posts, bot user agents, rate limits, staff exclusion, registered linking, the stats themselves, and page speed (the request fires after load; no console errors or CSP violations).
+
+### Status: built ✓ (2026-11-06)
+- The visitor suite passes on development and on a production build (27/27, including the `Secure` cookie flag). The security (57/57) and users (57/57) suites still pass on the production build.
+- The home page is still statically generated (`○ /`, revalidated every 5 minutes). In the browser the ping fires once, after the load event, with no console or CSP errors, and the cookie can't be read by page scripts.
+- Found and fixed during testing: on a slow load the idle callback could wait several seconds, so quick visitors might never be counted. The ping now also goes out when the visitor leaves (`pagehide` with `keepalive`), and the idle wait is capped at 2 s.
+
 ## 6. Before launch
 - Replace mock mentors, testimonials, prices; confirm email; upload brochure.
 - MongoDB Atlas (with backups) in production; Razorpay live keys + live webhook (README → Payments).

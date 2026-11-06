@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { registerVisitorAfterResponse } from "@/lib/analytics/visitors";
 import { mutateDb } from "@/lib/db";
 import { notifyEnquiry } from "@/lib/mail/notify";
 import { consume, LIMITS } from "@/lib/security/rate-limit";
@@ -49,6 +50,8 @@ export async function POST(req: Request) {
   revalidatePath("/admin", "layout");
   // Staff alert + learner confirmation, sent after the response (SMTP never slows the form down).
   after(() => notifyEnquiry(enquiry.id));
+  // Visitor stats: this device now counts as Registered.
+  await registerVisitorAfterResponse(after);
 
   return NextResponse.json({ ok: true, id: enquiry.id }, { status: 201 });
 }

@@ -12,9 +12,11 @@ import {
   ReceiptText,
   TrendingUp,
   Upload,
+  Users,
   Wallet,
 } from "lucide-react";
 import { requirePageSession } from "@/lib/auth";
+import { visitorStats, type VisitorStats } from "@/lib/analytics/visitors";
 import { readDb } from "@/lib/db";
 import { computeOverview } from "@/lib/admin/metrics";
 import { formatPrice } from "@/lib/commerce";
@@ -64,6 +66,76 @@ function Kpi({
   );
 }
 
+const nf = new Intl.NumberFormat("en-IN");
+
+/** Unique visitors (first-party tracking; staff excluded). */
+function VisitorsSection({ stats }: { stats: VisitorStats }) {
+  if (!stats.available) {
+    return (
+      <Card className="mt-4 flex items-start gap-4 p-5 sm:p-6">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-paper text-brass">
+          <Users className="size-[18px]" />
+        </span>
+        <div>
+          <p className="eyebrow text-ink/45">Unique visitors</p>
+          <p className="mt-1.5 text-sm text-ink/60">Visitor stats need MongoDB (set MONGODB_URI). Nothing is tracked while the site runs on the local JSON file.</p>
+        </div>
+      </Card>
+    );
+  }
+  const regPct = stats.today ? Math.round((stats.registeredToday / stats.today) * 100) : 0;
+  return (
+    <section className="mt-4 grid gap-4 lg:grid-cols-3" aria-label="Visitors">
+      <Card className="p-5 sm:p-6 lg:col-span-2">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="eyebrow text-ink/45">Unique visitors · last 14 days</p>
+            <p className="display mt-2 text-3xl tabular-nums">
+              {nf.format(stats.today)} <span className="text-ink/40">today</span>
+            </p>
+          </div>
+          <p className="text-xs text-ink/45">Days in India time · admins not counted</p>
+        </div>
+        <AreaChart id="visitors" data={stats.series} unit={["unique visitor", "unique visitors"]} period="day" />
+      </Card>
+      <Card className="p-5 sm:p-6">
+        <p className="eyebrow text-ink/45">Who visited today</p>
+        <div className="mt-4 flex h-3 w-full gap-1 overflow-hidden rounded-full bg-ink/[0.06]" role="img" aria-label={`${stats.registeredToday} registered and ${stats.otherToday} other visitors today`}>
+          {stats.registeredToday > 0 && <div className="h-full rounded-full bg-brass" style={{ width: `${Math.max(regPct, 4)}%` }} />}
+          {stats.otherToday > 0 && <div className="h-full flex-1 rounded-full bg-ink/25" />}
+        </div>
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt className="flex items-center gap-1.5 text-xs text-ink/50">
+              <span className="size-2 rounded-full bg-brass" /> Registered
+            </dt>
+            <dd className="display mt-1 text-2xl tabular-nums">{nf.format(stats.registeredToday)}</dd>
+          </div>
+          <div>
+            <dt className="flex items-center gap-1.5 text-xs text-ink/50">
+              <span className="size-2 rounded-full bg-ink/25" /> Other
+            </dt>
+            <dd className="display mt-1 text-2xl tabular-nums">{nf.format(stats.otherToday)}</dd>
+          </div>
+        </dl>
+        <p className="mt-2 text-xs text-ink/45">Registered = has sent an enquiry or started a checkout from that device.</p>
+        <dl className="mt-5 divide-y divide-line border-t border-line text-sm">
+          {[
+            ["This month", stats.month],
+            ["All time", stats.allTime],
+            ["New today", stats.newToday],
+          ].map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between py-2.5">
+              <dt className="text-ink/60">{label}</dt>
+              <dd className="font-medium tabular-nums">{nf.format(Number(value))}</dd>
+            </div>
+          ))}
+        </dl>
+      </Card>
+    </section>
+  );
+}
+
 const initials = (name: string) =>
   name
     .split(" ")
@@ -73,7 +145,13 @@ const initials = (name: string) =>
 
 export default async function OverviewPage() {
   const session = await requirePageSession();
-  const db = await readDb();
+  const [db, visitors] = await Promise.all([
+    readDb(),
+    visitorStats().catch((err): VisitorStats => {
+      console.error("[visitors] stats unavailable", err);
+      return { available: false };
+    }),
+  ]);
   const data = computeOverview(db);
   const money = (n: number) => formatPrice(n, data.currency);
   const wa = db.settings.contact.whatsapp?.trim() ?? "";
@@ -145,6 +223,8 @@ export default async function OverviewPage() {
           href="/admin/content?tab=events"
         />
       </section>
+
+      <VisitorsSection stats={visitors} />
 
       {/* Revenue */}
       <section className="mt-4 grid gap-4 lg:grid-cols-3">

@@ -150,4 +150,7 @@ export const LIMITS = {
   securityAction: (admin: string): Rule => ({ key: bucket("sec-action", admin), limit: 10, windowMs: 10 * MIN }),
   userAdmin: (admin: string): Rule => ({ key: bucket("user-admin", admin), limit: 30, windowMs: 10 * MIN }),
   inviteIp: (ip: string): Rule => ({ key: bucket("invite-ip", ip), limit: 20, windowMs: 15 * MIN }),
+  /** visitor tracking: every hit, and new devices separately (stops count inflation) */
+  trackIp: (ip: string): Rule => ({ key: bucket("track-ip", ip), limit: 120, windowMs: 10 * MIN }),
+  trackNewIp: (ip: string): Rule => ({ key: bucket("track-new-ip", ip), limit: 30, windowMs: 60 * MIN }),
 };
